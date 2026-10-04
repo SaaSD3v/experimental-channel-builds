@@ -1,4 +1,4 @@
-name: Build Ubuntu rootfs
+name: Build Void Linux rootfs
 
 on:
   workflow_dispatch:
@@ -32,13 +32,13 @@ permissions:
   actions: read
 
 concurrency:
-  group: channel-ubuntu-rootfs
+  group: channel-void-rootfs
   cancel-in-progress: true
 
 env:
-  DISTRO: ubuntu
+  DISTRO: void
   ARCH: arm64
-  ROOTFS_LABEL: ubuntu
+  ROOTFS_LABEL: void
   ROOTFS_UUID: 89530000-6320-4000-8000-000000000001
   KERNEL_URL: https://github.com/SaaSD3v/linux.git
   KERNEL_REF: msm8953/latest
@@ -47,30 +47,32 @@ jobs:
   rootfs:
     runs-on: ubuntu-24.04
     timeout-minutes: 180
+
     steps:
-      - name: Checkout Ubuntu builder branch
+      - name: Checkout Void Linux builder branch
         uses: actions/checkout@v4
         with:
-          ref: ubuntu
+          ref: void
 
-      - name: Validate Ubuntu scripts
+      - name: Validate Void Linux scripts
         run: |
           set -eux
-          bash -n ubuntu/build.sh
-          sh -n ubuntu/rootfs/usr/local/sbin/channel-usb-gadget
-          sh -n ubuntu/rootfs/usr/local/sbin/channel-wifi-firmware
+          bash -n void/build.sh
+          sh -n void/rootfs/usr/local/sbin/channel-usb-gadget
+          sh -n void/rootfs/usr/local/sbin/channel-wifi-firmware
 
-      - name: Install Ubuntu rootfs dependencies
+      - name: Install Void Linux rootfs dependencies
         run: |
           set -euxo pipefail
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            git ca-certificates curl rsync cpio gzip xz-utils zstd \
-            e2fsprogs arch-test qemu-user-static binfmt-support \
+            git ca-certificates curl rsync tar gzip xz-utils zstd \
+            e2fsprogs qemu-user-static binfmt-support \
             openssh-client openssl kmod file device-tree-compiler
           sudo update-binfmts --enable qemu-aarch64
-          arch-test arm64
+          command -v qemu-aarch64-static
           command -v gh
+          docker --version
 
       - name: Find reusable kernel checkpoint
         id: kernel_run
@@ -201,7 +203,7 @@ jobs:
           echo "KERNEL_CONFIG_FILE=$KERNEL_DIR/kernel.config" >> "$GITHUB_ENV"
           echo "KERNEL_SYSTEM_MAP_FILE=$KERNEL_DIR/System.map" >> "$GITHUB_ENV"
 
-      - name: Build Ubuntu rootfs
+      - name: Build Void Linux rootfs
         env:
           DISTRO: ${{ env.DISTRO }}
           ROOTFS_LABEL: ${{ env.ROOTFS_LABEL }}
@@ -218,25 +220,25 @@ jobs:
           SSH_PASSWORD: ${{ secrets.SSH_PASSWORD }}
         run: |
           set -euxo pipefail
-          chmod +x ubuntu/build.sh
-          ubuntu/build.sh
-          test -s out/ubuntu-channel-rootfs.ext4.zst
-          grep -Fqx 'distribution=ubuntu' out/build-info.txt
-          grep -Fqx 'ubuntu_version=26.04.1' out/build-info.txt
-          grep -Fqx 'rootfs_label=ubuntu' out/build-info.txt
-          grep -Fqx "rootfs_uuid=$ROOTFS_UUID" out/build-info.txt
-          grep -Fqx 'wifi_manager=NetworkManager' out/build-info.txt
-          grep -Fqx 'time_sync=systemd-timesyncd' out/build-info.txt
-          grep -Fqx 'ssh_listen=172.16.42.1' out/build-info.txt
+          chmod +x void/build.sh
+          void/build.sh
 
-      - name: Upload Ubuntu rootfs
+          test -s out/void-channel-rootfs.ext4.zst
+          grep -Fqx 'distro=void' out/build-info.txt
+          grep -Fqx 'rootfs_label=void' out/build-info.txt
+          grep -Fqx "rootfs_uuid=$ROOTFS_UUID" out/build-info.txt
+          grep -Fqx 'network_manager=NetworkManager' out/build-info.txt
+          grep -q '^ssh_auth=' out/build-info.txt
+          grep -q '^ssh_listen=172.16.42.1$' out/build-info.txt
+
+      - name: Upload Void Linux rootfs
         uses: actions/upload-artifact@v4
         with:
-          name: channel-ubuntu-rootfs
+          name: channel-void-rootfs
           path: |
-            out/ubuntu-channel-rootfs.ext4.zst
+            out/void-channel-rootfs.ext4.zst
             out/build-info.txt
-            out/SHA256SUMS.ubuntu
+            out/SHA256SUMS.void
           if-no-files-found: error
           retention-days: 14
 
@@ -244,7 +246,7 @@ jobs:
         if: always() && hashFiles('out/channel_test_ed25519') != ''
         uses: actions/upload-artifact@v4
         with:
-          name: channel-ubuntu-ssh-test-key
+          name: channel-void-ssh-test-key
           path: |
             out/channel_test_ed25519
             out/channel_test_ed25519.pub
@@ -255,7 +257,7 @@ jobs:
         if: always() && hashFiles('out/channel_ssh_password.txt') != ''
         uses: actions/upload-artifact@v4
         with:
-          name: channel-ubuntu-ssh-password
+          name: channel-void-ssh-password
           path: out/channel_ssh_password.txt
           if-no-files-found: ignore
           retention-days: 1
