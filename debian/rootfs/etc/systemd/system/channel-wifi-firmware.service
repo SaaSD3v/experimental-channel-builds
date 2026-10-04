@@ -1,0 +1,14 @@
+[Unit]
+Description=Prepare Moto G7 Play stock WCNSS firmware
+After=systemd-udev-settle.service local-fs.target
+Wants=systemd-udev-settle.service
+Before=NetworkManager.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/channel-wifi-firmware
+RemainAfterExit=yes
+TimeoutStartSec=60
+
+[Install]
+WantedBy=multi-user.target
