@@ -1,0 +1,271 @@
+name: Build Debian rootfs
+
+on:
+  workflow_dispatch:
+    inputs:
+      ssh_auth:
+        description: SSH authentication mode (open-root-usb = direct root login on USB only)
+        required: true
+        type: choice
+        default: generated-key
+        options:
+          - generated-key
+          - public-key-input
+          - public-key-secret
+          - generated-password
+          - password-secret
+          - generated-key+generated-password
+          - public-key-input+password-secret
+          - public-key-secret+password-secret
+          - open-root-usb
+      ssh_public_key:
+        description: Public key to install when using a public-key-input mode
+        required: false
+        type: string
+      kernel_run_id:
+        description: Optional Build mainline kernel run ID; empty uses the latest successful run
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: channel-debian-rootfs
+  cancel-in-progress: true
+
+env:
+  DISTRO: debian
+  ARCH: arm64
+  ROOTFS_LABEL: debian
+  ROOTFS_UUID: 89530000-6320-4000-8000-000000000001
+  KERNEL_URL: https://github.com/SaaSD3v/linux.git
+  KERNEL_REF: msm8953/latest
+
+jobs:
+  rootfs:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout Debian builder branch
+        uses: actions/checkout@v4
+        with:
+          ref: debian
+
+      - name: Validate Debian scripts
+        run: |
+          set -eux
+          bash -n debian/build.sh
+          sh -n debian/rootfs/usr/local/sbin/channel-usb-gadget
+          sh -n debian/rootfs/usr/local/sbin/channel-wifi-firmware
+
+      - name: Install Debian rootfs dependencies
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git ca-certificates curl rsync cpio gzip xz-utils zstd \
+            e2fsprogs mmdebstrap arch-test qemu-user-static binfmt-support \
+            openssh-client openssl kmod file device-tree-compiler
+
+          DEBIAN_KEYRING_DEB=/tmp/debian-archive-keyring_2025.1_all.deb
+          curl -fsSL --retry 3 \
+            https://deb.debian.org/debian/pool/main/d/debian-archive-keyring/debian-archive-keyring_2025.1_all.deb \
+            -o "$DEBIAN_KEYRING_DEB"
+          echo '9ea7778e443144ca490668737a8ab22dd3e748bb99e805e22ec055abeb3c7fac  /tmp/debian-archive-keyring_2025.1_all.deb' | sha256sum -c -
+          sudo dpkg -i "$DEBIAN_KEYRING_DEB"
+          test -s /usr/share/keyrings/debian-archive-keyring.gpg
+
+          sudo update-binfmts --enable qemu-aarch64
+          arch-test arm64
+          command -v gh
+
+      - name: Find reusable kernel checkpoint
+        id: kernel_run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED_RUN_ID: ${{ inputs.kernel_run_id }}
+        run: |
+          set -euxo pipefail
+
+          artifact_for_run() {
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$1/artifacts" \
+              --jq '.artifacts[] | select(.expired == false and (.name | startswith("channel-mainline-kernel-"))) | .id' \
+              | head -n1
+          }
+
+          RUN_ID=""
+          if [ -n "$REQUESTED_RUN_ID" ]; then
+            CONCLUSION="$(gh run view "$REQUESTED_RUN_ID" --repo "$GITHUB_REPOSITORY" --json conclusion --jq '.conclusion')"
+            test "$CONCLUSION" = success
+            ARTIFACT_ID="$(artifact_for_run "$REQUESTED_RUN_ID")"
+            if [ -z "$ARTIFACT_ID" ]; then
+              echo "Requested kernel run $REQUESTED_RUN_ID has no live channel-mainline-kernel artifact." >&2
+              exit 1
+            fi
+            RUN_ID="$REQUESTED_RUN_ID"
+          else
+            while IFS= read -r CANDIDATE; do
+              [ -n "$CANDIDATE" ] || continue
+              if [ -n "$(artifact_for_run "$CANDIDATE")" ]; then
+                RUN_ID="$CANDIDATE"
+                break
+              fi
+            done < <(gh run list \
+              --repo "$GITHUB_REPOSITORY" \
+              --workflow build-mainline.yml \
+              --branch main \
+              --status success \
+              --limit 10 \
+              --json databaseId \
+              --jq '.[].databaseId')
+          fi
+
+          if [ -n "$RUN_ID" ]; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+            echo "Using reusable kernel artifact from run $RUN_ID"
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            echo "No live reusable kernel artifact exists; building a temporary kernel for this rootfs run."
+          fi
+
+      - name: Download reusable kernel checkpoint
+        if: steps.kernel_run.outputs.found == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          repository: ${{ github.repository }}
+          run-id: ${{ steps.kernel_run.outputs.run_id }}
+          github-token: ${{ github.token }}
+          pattern: channel-mainline-kernel-*
+          path: kernel-artifact
+          merge-multiple: true
+
+      - name: Select downloaded kernel checkpoint
+        if: steps.kernel_run.outputs.found == 'true'
+        run: |
+          echo "KERNEL_CHECKPOINT_DIR=$GITHUB_WORKSPACE/kernel-artifact" >> "$GITHUB_ENV"
+
+      - name: Checkout mainline kernel builder for fallback
+        if: steps.kernel_run.outputs.found != 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: .kernel-builder
+
+      - name: Install temporary kernel build dependencies
+        if: steps.kernel_run.outputs.found != 'true'
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            make bc bison flex gcc-aarch64-linux-gnu \
+            libc6-dev-arm64-cross libc6-arm64-cross linux-libc-dev-arm64-cross \
+            device-tree-compiler libssl-dev libelf-dev dwarves zstd
+
+      - name: Build temporary kernel dependency
+        if: steps.kernel_run.outputs.found != 'true'
+        env:
+          KERNEL_DIR: ${{ github.workspace }}/kernel-fallback
+          OUT_DIR: ${{ github.workspace }}/kernel-local
+        run: |
+          set -euxo pipefail
+          rm -rf "$KERNEL_DIR" "$OUT_DIR"
+          mkdir -p "$OUT_DIR"
+          git clone --depth=1 --branch "$KERNEL_REF" "$KERNEL_URL" "$KERNEL_DIR"
+          chmod +x .kernel-builder/mainline/build.sh
+          .kernel-builder/mainline/build.sh
+          echo "KERNEL_CHECKPOINT_DIR=$OUT_DIR" >> "$GITHUB_ENV"
+          echo "Temporary kernel built for this run only; it will not be uploaded."
+
+      - name: Validate selected kernel checkpoint
+        run: |
+          set -euxo pipefail
+          KERNEL_DIR="$KERNEL_CHECKPOINT_DIR"
+
+          test -n "$KERNEL_DIR"
+          test -s "$KERNEL_DIR/kernel-release.txt"
+          test -s "$KERNEL_DIR/kernel.config"
+          test -s "$KERNEL_DIR/System.map"
+          test -s "$KERNEL_DIR/sdm632-motorola-channel.dtb"
+
+          MODULES_ARCHIVE="$(find "$KERNEL_DIR" -maxdepth 1 -type f -name 'kernel-modules-*.tar.zst' -print -quit)"
+          test -n "$MODULES_ARCHIVE"
+          test -s "$MODULES_ARCHIVE"
+
+          KREL="$(cat "$KERNEL_DIR/kernel-release.txt")"
+          test -n "$KREL"
+          case "$KREL" in *-dirty) echo "dirty kernel checkpoint: $KREL" >&2; exit 1;; esac
+
+          test "$(fdtget -t s "$KERNEL_DIR/sdm632-motorola-channel.dtb" /soc@0/remoteproc@a204000/iris compatible)" = "qcom,wcn3620"
+          grep -qx 'CONFIG_WCN36XX=m' "$KERNEL_DIR/kernel.config"
+          grep -qx 'CONFIG_QCOM_WCNSS_PIL=m' "$KERNEL_DIR/kernel.config"
+          grep -qx 'CONFIG_QCOM_WCNSS_CTRL=m' "$KERNEL_DIR/kernel.config"
+          grep -qx 'CONFIG_USB_CONFIGFS_RNDIS=y' "$KERNEL_DIR/kernel.config"
+          grep -qx 'CONFIG_USB_DWC3_QCOM=y' "$KERNEL_DIR/kernel.config"
+
+          echo "KERNEL_RELEASE=$KREL" >> "$GITHUB_ENV"
+          echo "KERNEL_MODULES_ARCHIVE=$MODULES_ARCHIVE" >> "$GITHUB_ENV"
+          echo "KERNEL_CONFIG_FILE=$KERNEL_DIR/kernel.config" >> "$GITHUB_ENV"
+          echo "KERNEL_SYSTEM_MAP_FILE=$KERNEL_DIR/System.map" >> "$GITHUB_ENV"
+
+      - name: Build Debian rootfs
+        env:
+          DISTRO: ${{ env.DISTRO }}
+          ROOTFS_LABEL: ${{ env.ROOTFS_LABEL }}
+          ROOTFS_UUID: ${{ env.ROOTFS_UUID }}
+          KERNEL_RELEASE: ${{ env.KERNEL_RELEASE }}
+          KERNEL_MODULES_ARCHIVE: ${{ env.KERNEL_MODULES_ARCHIVE }}
+          KERNEL_CONFIG_FILE: ${{ env.KERNEL_CONFIG_FILE }}
+          KERNEL_SYSTEM_MAP_FILE: ${{ env.KERNEL_SYSTEM_MAP_FILE }}
+          OUT_DIR: ${{ github.workspace }}/out
+          WORK_DIR: ${{ github.workspace }}/.work
+          SSH_AUTH_MODE: ${{ inputs.ssh_auth }}
+          SSH_PUBLIC_KEY_INPUT: ${{ inputs.ssh_public_key }}
+          SSH_PUBLIC_KEY: ${{ secrets.SSH_PUBLIC_KEY }}
+          SSH_PASSWORD: ${{ secrets.SSH_PASSWORD }}
+        run: |
+          set -euxo pipefail
+          chmod +x debian/build.sh
+          debian/build.sh
+
+          test -s out/debian-channel-rootfs.ext4.zst
+          grep -Fqx 'distro=debian' out/build-info.txt
+          grep -Fqx 'rootfs_label=debian' out/build-info.txt
+          grep -Fqx "rootfs_uuid=$ROOTFS_UUID" out/build-info.txt
+          grep -Fqx 'network_manager=NetworkManager' out/build-info.txt
+          grep -q '^ssh_auth=' out/build-info.txt
+          grep -q '^ssh_listen=172.16.42.1$' out/build-info.txt
+
+      - name: Upload Debian rootfs
+        uses: actions/upload-artifact@v4
+        with:
+          name: channel-debian-rootfs
+          path: |
+            out/debian-channel-rootfs.ext4.zst
+            out/build-info.txt
+            out/SHA256SUMS.debian
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload generated SSH test key
+        if: always() && hashFiles('out/channel_test_ed25519') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: channel-debian-ssh-test-key
+          path: |
+            out/channel_test_ed25519
+            out/channel_test_ed25519.pub
+          if-no-files-found: ignore
+          retention-days: 1
+
+      - name: Upload generated SSH password
+        if: always() && hashFiles('out/channel_ssh_password.txt') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: channel-debian-ssh-password
+          path: out/channel_ssh_password.txt
+          if-no-files-found: ignore
+          retention-days: 1
