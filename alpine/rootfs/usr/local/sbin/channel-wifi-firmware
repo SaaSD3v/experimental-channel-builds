@@ -1,0 +1,89 @@
+#!/bin/sh
+set -eu
+
+RUN_DIR=/run/channel-firmware
+MODEM_MNT="$RUN_DIR/modem"
+VENDOR_MNT="$RUN_DIR/vendor"
+
+mkdir -p "$MODEM_MNT" "$VENDOR_MNT"
+mkdir -p /lib/firmware/qcom/msm8953/motorola/channel /lib/firmware/wlan/prima
+
+find_part() {
+    for label in "$@"; do
+        path="/dev/disk/by-partlabel/$label"
+        if [ -e "$path" ]; then
+            printf '%s\n' "$path"
+            return 0
+        fi
+    done
+    return 1
+}
+
+MODEM_DEV="$(find_part modem_a modem_b 2>/dev/null || true)"
+VENDOR_DEV="$(find_part vendor_a vendor_b 2>/dev/null || true)"
+
+# Fixed Channel partition-number fallbacks for early/limited udev environments.
+[ -n "$MODEM_DEV" ] || [ ! -b /dev/mmcblk0p19 ] || MODEM_DEV=/dev/mmcblk0p19
+[ -n "$VENDOR_DEV" ] || [ ! -b /dev/mmcblk0p60 ] || VENDOR_DEV=/dev/mmcblk0p60
+
+[ -n "$MODEM_DEV" ] || { echo "channel-wifi: modem partition not found" >&2; exit 1; }
+[ -n "$VENDOR_DEV" ] || { echo "channel-wifi: vendor partition not found" >&2; exit 1; }
+
+if ! /bin/busybox mountpoint -q "$MODEM_MNT"; then
+    mount -t ext4 -o ro,nosuid,nodev,noexec "$MODEM_DEV" "$MODEM_MNT"
+fi
+if ! /bin/busybox mountpoint -q "$VENDOR_MNT"; then
+    mount -t ext4 -o ro,nosuid,nodev,noexec "$VENDOR_DEV" "$VENDOR_MNT"
+fi
+
+[ -s "$MODEM_MNT/image/wcnss.mdt" ] || {
+    echo "channel-wifi: wcnss.mdt missing from stock modem partition" >&2
+    exit 1
+}
+[ -s "$VENDOR_MNT/etc/wifi/WCNSS_qcom_wlan_nv.bin" ] || {
+    echo "channel-wifi: WCNSS NV missing from stock vendor partition" >&2
+    exit 1
+}
+
+found=0
+for src in "$MODEM_MNT"/image/wcnss.*; do
+    [ -f "$src" ] || continue
+    ln -sf "$src" "/lib/firmware/${src##*/}"
+    found=$((found + 1))
+done
+[ "$found" -gt 1 ] || { echo "channel-wifi: incomplete WCNSS firmware set" >&2; exit 1; }
+
+NV="$VENDOR_MNT/etc/wifi/WCNSS_qcom_wlan_nv.bin"
+ln -sf "$NV" /lib/firmware/qcom/msm8953/motorola/channel/WCNSS_qcom_wlan_nv.bin
+ln -sf "$NV" /lib/firmware/wlan/prima/WCNSS_qcom_wlan_nv.bin
+
+# qcom_wcnss_pil is blacklisted from udev autoload so firmware links are in
+# place before the remote processor is started.
+modprobe qcom_wcnss_pil
+
+i=0
+running=0
+while [ "$i" -lt 50 ]; do
+    for state in /sys/class/remoteproc/remoteproc*/state; do
+        [ -r "$state" ] || continue
+        if [ "$(cat "$state")" = "running" ]; then
+            running=1
+            break
+        fi
+    done
+    [ "$running" -eq 1 ] && break
+    i=$((i + 1))
+    sleep 0.2
+done
+[ "$running" -eq 1 ] || { echo "channel-wifi: WCNSS remoteproc did not reach running state" >&2; exit 1; }
+
+modprobe wcn36xx
+
+i=0
+while [ ! -d /sys/class/net/wlan0 ]; do
+    i=$((i + 1))
+    [ "$i" -lt 30 ] || { echo "channel-wifi: wlan0 did not appear" >&2; exit 1; }
+    sleep 0.2
+done
+
+echo "channel-wifi: stock WCNSS firmware ready; wlan0 available"

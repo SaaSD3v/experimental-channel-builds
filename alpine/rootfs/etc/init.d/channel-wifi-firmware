@@ -1,0 +1,10 @@
+#!/sbin/openrc-run
+
+description="Prepare Moto G7 Play stock WCNSS firmware"
+command="/usr/local/sbin/channel-wifi-firmware"
+
+depend() {
+    need localmount
+    after modules udev-trigger
+    before networkmanager
+}
