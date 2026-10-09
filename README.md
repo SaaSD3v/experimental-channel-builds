@@ -12,8 +12,17 @@ Experimental ARM64 rootfs matrix for the Motorola Moto G7 Play (`channel`), base
 - Every distro rootfs uses the fixed ext4 UUID:
   `89530000-6320-4000-8000-000000000001`
 - Each distro has its own filesystem label.
-- Rootfs workflows reuse a live `channel-mainline-kernel-*` artifact when available.
-- If no reusable kernel artifact exists, the rootfs workflow compiles the same kernel temporarily and uploads **only** the rootfs.
+- Rootfs workflows compile the latest kernel source by default, and upload **only** the rootfs.
+- Reuse of an existing `channel-mainline-kernel-*` artifact is optional via `reuse_kernel` (unchecked by default); `kernel_run_id` requires reuse. When the requested cache is unavailable, the kernel is compiled temporarily.
+- The selected kernel source revision is recorded and the reused commit is shown in the workflow logs.
+
+## Manual workflows and SSH options
+
+- For passwordless USB access, choose `Build <distro> rootfs (USB open root)`. This separate launcher has no SSH key/password fields; `reuse_kernel` is its only option.
+- For generated key, supplied public key, password or secret-based login, use the regular `Build <distro> rootfs` launcher.
+- In the regular SSH workflow, `ssh_public_key` is valid only for `public-key-input` modes; `kernel_run_id` is valid only when `reuse_kernel` is checked. Invalid combinations fail early.
+- GitHub Actions does not dynamically hide `workflow_dispatch` inputs; the two-workflow approach avoids an irrelevant form for USB-only bring-up.
+- The `main` branch exposes the UI launchers. Each workflow checks out its own distro branch for scripts and overlays.
 
 ## Branches
 
