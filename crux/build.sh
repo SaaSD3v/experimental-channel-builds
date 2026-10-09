@@ -187,9 +187,19 @@ sudo install -m 0644 "$WORK_DIR/$DNSMASQ_PKG" "$ROOTFS/tmp/$DNSMASQ_PKG"
 
 # Let CRUX pkgadd record the native ARM64 binary and rc files in its own
 # package database. No port sources or host build dependencies reach the image.
+# The CRUX rootfs has no /dev/urandom before boot. dnsmasq --test needs
+# it inside the chroot. Bind host /dev only for validation; unmount before
+# packing the final filesystem so no host device nodes are shipped.
+cleanup_crux_dev() {
+  sudo umount "$ROOTFS/dev" 2>/dev/null || true
+}
+trap cleanup_crux_dev EXIT
+sudo mount --bind /dev "$ROOTFS/dev"
+sudo test -c "$ROOTFS/dev/urandom"
 sudo update-binfmts --enable qemu-aarch64 || true
 sudo install -m 0755 /usr/bin/qemu-aarch64-static "$ROOTFS/usr/bin/qemu-aarch64-static"
 sudo chroot "$ROOTFS" /bin/sh -ec '
+  test -c /dev/urandom
   pkgadd "/tmp/'"$DNSMASQ_PKG"'"
   test -x /usr/sbin/dnsmasq
   test -x /etc/rc.d/dnsmasq
@@ -210,6 +220,8 @@ if [ "$ALLOW_EMPTY_SSH" -eq 1 ]; then
   sudo grep -q '^root::' "$ROOTFS/etc/shadow"
 fi
 sudo rm -f "$ROOTFS/usr/bin/qemu-aarch64-static" "$ROOTFS/tmp/$DNSMASQ_PKG"
+cleanup_crux_dev
+trap - EXIT
 echo "::endgroup::"
 
 USED_MB="$(sudo du -sm "$ROOTFS" | awk '{print $1}')"; IMAGE_MB=$((USED_MB + 200)); [ "$IMAGE_MB" -ge 1536 ] || IMAGE_MB=1536
