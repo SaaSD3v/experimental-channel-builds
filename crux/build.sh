@@ -67,6 +67,10 @@ if [ "$ALLOW_EMPTY_SSH" -eq 1 ]; then SSH_ROOT_LOGIN=yes; SSH_PUBKEY=no; SSH_PAS
 elif [ "$ALLOW_PASSWORD" -eq 1 ]; then SSH_ROOT_LOGIN=yes; SSH_PUBKEY=$([ "$ALLOW_KEY" -eq 1 ] && echo yes || echo no); SSH_PASSWORD_AUTH=yes; SSH_EMPTY_PASSWORDS=no;
 else SSH_ROOT_LOGIN=prohibit-password; SSH_PUBKEY=yes; SSH_PASSWORD_AUTH=no; SSH_EMPTY_PASSWORDS=no; fi
 sudo mkdir -p "$ROOTFS/etc/ssh/sshd_config.d"
+# CRUX OpenSSH uses PAM. For the explicitly selected USB-only empty-password
+# mode, use OpenSSH shadow authentication without altering global PAM rules.
+SSH_USE_PAM=yes
+[ "$ALLOW_EMPTY_SSH" -eq 0 ] || SSH_USE_PAM=no
 sudo tee "$ROOTFS/etc/ssh/sshd_config.d/10-channel-usb.conf" >/dev/null <<EOF
 ListenAddress 172.16.42.1
 AllowUsers root
@@ -75,8 +79,13 @@ PubkeyAuthentication $SSH_PUBKEY
 PasswordAuthentication $SSH_PASSWORD_AUTH
 KbdInteractiveAuthentication no
 PermitEmptyPasswords $SSH_EMPTY_PASSWORDS
+UsePAM $SSH_USE_PAM
 UseDNS no
 EOF
+# Include Channel's settings before the packaged sshd defaults (first value wins).
+if ! sudo head -n 1 "$ROOTFS/etc/ssh/sshd_config" | grep -Fqx 'Include /etc/ssh/sshd_config.d/*.conf'; then
+  sudo sed -i '1iInclude /etc/ssh/sshd_config.d/*.conf' "$ROOTFS/etc/ssh/sshd_config"
+fi
 sudo ssh-keygen -A -f "$ROOTFS"
 
 echo "::group::Configure CRUX services"
