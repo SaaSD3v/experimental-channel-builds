@@ -19,13 +19,33 @@ on:
           - public-key-secret+password-secret
           - open-root-usb
       ssh_public_key:
-        description: Public key to install when using a public-key-input mode
+        description: Only for public-key-input modes; leave blank for all others
         required: false
         type: string
+      reuse_kernel:
+        description: Reuse a prebuilt kernel artifact instead of compiling latest source
+        required: false
+        type: boolean
+        default: false
       kernel_run_id:
-        description: Optional Build mainline kernel run ID; empty uses the latest successful run
+        description: Only if reuse_kernel is checked; blank selects latest successful artifact
         required: false
         type: string
+
+  workflow_call:
+    inputs:
+      ssh_auth:
+        type: string
+        default: generated-key
+      ssh_public_key:
+        type: string
+        default: ''
+      reuse_kernel:
+        type: boolean
+        default: false
+      kernel_run_id:
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -49,6 +69,39 @@ jobs:
     timeout-minutes: 180
 
     steps:
+      - name: Validate build option combinations
+        env:
+          SSH_AUTH_MODE: ${{ inputs.ssh_auth }}
+          SSH_PUBLIC_KEY_INPUT: ${{ inputs.ssh_public_key }}
+          REUSE_KERNEL: ${{ inputs.reuse_kernel }}
+          REQUESTED_RUN_ID: ${{ inputs.kernel_run_id }}
+        run: |
+          set -euo pipefail
+          case "$SSH_AUTH_MODE" in
+            public-key-input|public-key-input+password-secret)
+              if [ -z "$SSH_PUBLIC_KEY_INPUT" ]; then
+                echo "::error::This SSH mode requires ssh_public_key."
+                exit 1
+              fi
+              ;;
+            *)
+              if [ -n "$SSH_PUBLIC_KEY_INPUT" ]; then
+                echo "::error::ssh_public_key is only valid for public-key-input SSH modes."
+                exit 1
+              fi
+              ;;
+          esac
+          if [ -n "$REQUESTED_RUN_ID" ]; then
+            if [ "$REUSE_KERNEL" != "true" ]; then
+              echo "::error::kernel_run_id requires reuse_kernel=true."
+              exit 1
+            fi
+            if ! [[ "$REQUESTED_RUN_ID" =~ ^[0-9]+$ ]]; then
+              echo "::error::kernel_run_id must be a numeric GitHub Actions run ID."
+              exit 1
+            fi
+          fi
+
       - name: Checkout Chimera Linux builder branch
         uses: actions/checkout@v4
         with:
@@ -79,8 +132,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REQUESTED_RUN_ID: ${{ inputs.kernel_run_id }}
+          REUSE_KERNEL: ${{ inputs.reuse_kernel }}
         run: |
           set -euxo pipefail
+
+          if [ "$REUSE_KERNEL" != "true" ]; then
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            echo "Kernel reuse disabled; building latest $KERNEL_REF from $KERNEL_URL."
+            exit 0
+          fi
 
           artifact_for_run() {
             gh api "repos/$GITHUB_REPOSITORY/actions/runs/$1/artifacts" \
@@ -173,12 +233,101 @@ jobs:
           echo "Temporary kernel built for this run only; it will not be uploaded."
 
       - name: Validate selected kernel checkpoint
+        env:
+          REUSE_KERNEL: ${{ inputs.reuse_kernel }}
         run: |
           set -euxo pipefail
           KERNEL_DIR="$KERNEL_CHECKPOINT_DIR"
 
           test -n "$KERNEL_DIR"
           test -s "$KERNEL_DIR/kernel-release.txt"
+          test -s "$KERNEL_DIR/kernel-git-revision.txt"
+          grep -Eq '^[a-f0-9]{40}
+          test -s "$KERNEL_DIR/System.map"
+          test -s "$KERNEL_DIR/sdm632-motorola-channel.dtb"
+
+          MODULES_ARCHIVE="$(find "$KERNEL_DIR" -maxdepth 1 -type f -name 'kernel-modules-*.tar.zst' -print -quit)"
+          test -n "$MODULES_ARCHIVE"
+          test -s "$MODULES_ARCHIVE"
+
+          KREL="$(cat "$KERNEL_DIR/kernel-release.txt")"
+          test -n "$KREL"
+          case "$KREL" in *-dirty) echo "dirty kernel checkpoint: $KREL" >&2; exit 1;; esac
+
+          test "$(fdtget -t s "$KERNEL_DIR/sdm632-motorola-channel.dtb" /soc@0/remoteproc@a204000/iris compatible)" = "qcom,wcn3620"
+          grep -qx 'CONFIG_WCN36XX=m' "$KERNEL_DIR/kernel.config"
+          grep -qx 'CONFIG_QCOM_WCNSS_PIL=m' "$KERNEL_DIR/kernel.config"
+          grep -qx 'CONFIG_QCOM_WCNSS_CTRL=m' "$KERNEL_DIR/kernel.config"
+          grep -qx 'CONFIG_USB_CONFIGFS_RNDIS=y' "$KERNEL_DIR/kernel.config"
+          grep -qx 'CONFIG_USB_DWC3_QCOM=y' "$KERNEL_DIR/kernel.config"
+
+          echo "KERNEL_RELEASE=$KREL" >> "$GITHUB_ENV"
+          echo "KERNEL_MODULES_ARCHIVE=$MODULES_ARCHIVE" >> "$GITHUB_ENV"
+          echo "KERNEL_CONFIG_FILE=$KERNEL_DIR/kernel.config" >> "$GITHUB_ENV"
+          echo "KERNEL_SYSTEM_MAP_FILE=$KERNEL_DIR/System.map" >> "$GITHUB_ENV"
+
+      - name: Build Chimera Linux rootfs
+        env:
+          DISTRO: ${{ env.DISTRO }}
+          ROOTFS_LABEL: ${{ env.ROOTFS_LABEL }}
+          ROOTFS_UUID: ${{ env.ROOTFS_UUID }}
+          KERNEL_RELEASE: ${{ env.KERNEL_RELEASE }}
+          KERNEL_MODULES_ARCHIVE: ${{ env.KERNEL_MODULES_ARCHIVE }}
+          KERNEL_CONFIG_FILE: ${{ env.KERNEL_CONFIG_FILE }}
+          KERNEL_SYSTEM_MAP_FILE: ${{ env.KERNEL_SYSTEM_MAP_FILE }}
+          OUT_DIR: ${{ github.workspace }}/out
+          WORK_DIR: ${{ github.workspace }}/.work
+          SSH_AUTH_MODE: ${{ inputs.ssh_auth }}
+          SSH_PUBLIC_KEY_INPUT: ${{ inputs.ssh_public_key }}
+          SSH_PUBLIC_KEY: ${{ secrets.SSH_PUBLIC_KEY }}
+          SSH_PASSWORD: ${{ secrets.SSH_PASSWORD }}
+        run: |
+          set -euxo pipefail
+          chmod +x chimera/build.sh
+          chimera/build.sh
+
+          test -s out/chimera-channel-rootfs.ext4.zst
+          grep -Fqx 'distro=chimera' out/build-info.txt
+          grep -Fqx 'rootfs_label=chimera' out/build-info.txt
+          grep -Fqx "rootfs_uuid=$ROOTFS_UUID" out/build-info.txt
+          grep -Fqx 'network_manager=NetworkManager' out/build-info.txt
+          grep -q '^ssh_auth=' out/build-info.txt
+          grep -q '^ssh_listen=172.16.42.1$' out/build-info.txt
+
+      - name: Upload Chimera Linux rootfs
+        uses: actions/upload-artifact@v4
+        with:
+          name: channel-chimera-rootfs
+          path: |
+            out/chimera-channel-rootfs.ext4.zst
+            out/build-info.txt
+            out/SHA256SUMS.chimera
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload generated SSH test key
+        if: always() && hashFiles('out/channel_test_ed25519') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: channel-chimera-ssh-test-key
+          path: |
+            out/channel_test_ed25519
+            out/channel_test_ed25519.pub
+          if-no-files-found: ignore
+          retention-days: 1
+
+      - name: Upload generated SSH password
+        if: always() && hashFiles('out/channel_ssh_password.txt') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: channel-chimera-ssh-password
+          path: out/channel_ssh_password.txt
+          if-no-files-found: ignore
+          retention-days: 1
+ "$KERNEL_DIR/kernel-git-revision.txt"
+          if [ "$REUSE_KERNEL" = "true" ]; then
+            echo "::notice::Reusing explicitly selected kernel commit $(cat "$KERNEL_DIR/kernel-git-revision.txt")"
+          fi
           test -s "$KERNEL_DIR/kernel.config"
           test -s "$KERNEL_DIR/System.map"
           test -s "$KERNEL_DIR/sdm632-motorola-channel.dtb"
