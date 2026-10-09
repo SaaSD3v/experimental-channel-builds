@@ -110,9 +110,9 @@ esac
 EOF
 sudo chmod 0755 "$ROOTFS/etc/rc.d/channel-usb" "$ROOTFS/etc/rc.d/channel-wifi"
 if grep -q '^SERVICES=(' "$ROOTFS/etc/rc.conf"; then
-  sudo sed -i '/^SERVICES=(/ s/)/ channel-usb channel-wifi sshd)/' "$ROOTFS/etc/rc.conf"
+  sudo sed -i '/^SERVICES=(/ s/)/ channel-usb sshd dnsmasq channel-wifi)/' "$ROOTFS/etc/rc.conf"
 else
-  echo 'SERVICES=(channel-usb channel-wifi sshd)' | sudo tee -a "$ROOTFS/etc/rc.conf" >/dev/null
+  echo 'SERVICES=(channel-usb sshd dnsmasq channel-wifi)' | sudo tee -a "$ROOTFS/etc/rc.conf" >/dev/null
 fi
 echo "::endgroup::"
 
@@ -131,10 +131,75 @@ if [ ! -c "$ROOTFS/dev/null" ] || [ -L "$ROOTFS/dev/null" ]; then
 fi
 sudo test -c "$ROOTFS/dev/null"
 
+# Install the official CRUX 3.8 dnsmasq package and dependency in the
+# ARM64 target. This keeps the package registered in CRUX's package database.
+echo "::group::Install CRUX ARM64 USB DHCP"
+for port in nettle dnsmasq; do
+  sudo mkdir -p "$ROOTFS/usr/ports/opt/$port"
+  sudo rsync -a "crux.nu::ports/crux-3.8/opt/$port/" "$ROOTFS/usr/ports/opt/$port/"
+done
+sudo rm -f "$ROOTFS/etc/resolv.conf"
+sudo cp -L /etc/resolv.conf "$ROOTFS/etc/resolv.conf"
+sudo mkdir -p "$ROOTFS/proc"
+cleanup_chroot_mounts() {
+  sudo umount "$ROOTFS/proc" 2>/dev/null || true
+  sudo umount "$ROOTFS/dev" 2>/dev/null || true
+}
+trap cleanup_chroot_mounts EXIT
+sudo mount --bind /dev "$ROOTFS/dev"
+sudo mount -t proc proc "$ROOTFS/proc"
 sudo update-binfmts --enable qemu-aarch64 || true
 sudo install -m 0755 /usr/bin/qemu-aarch64-static "$ROOTFS/usr/bin/qemu-aarch64-static"
+sudo chroot "$ROOTFS" /bin/sh -lc 'prt-get info dnsmasq && prt-get depinst dnsmasq'
+sudo test -x "$ROOTFS/usr/sbin/dnsmasq"
+sudo test -x "$ROOTFS/etc/rc.d/dnsmasq"
+
+# DHCP is available only over the USB RNDIS management link; no DNS or
+# default gateway is advertised to the Windows computer.
+sudo tee "$ROOTFS/etc/dnsmasq.conf" >/dev/null <<'DNSMASQ'
+port=0
+interface=usb0
+bind-dynamic
+dhcp-range=172.16.42.2,172.16.42.20,255.255.255.0,12h
+dhcp-authoritative
+dhcp-option=3
+dhcp-option=6
+DNSMASQ
+sudo chroot "$ROOTFS" /usr/sbin/dnsmasq --test
 sudo chroot "$ROOTFS" /bin/sh -lc 'mkdir -p /run/sshd; sshd -t'
+
+# sshd -t checks syntax only; confirm the effective config and chosen mode.
+SSHD_EFFECTIVE="$(sudo chroot "$ROOTFS" /usr/sbin/sshd -T -C user=root,host=channel,addr=172.16.42.2,laddr=172.16.42.1,lport=22)"
+grep -Fqx "permitrootlogin $SSH_ROOT_LOGIN" <<< "$SSHD_EFFECTIVE"
+grep -Fqx "pubkeyauthentication $SSH_PUBKEY" <<< "$SSHD_EFFECTIVE"
+grep -Fqx "passwordauthentication $SSH_PASSWORD_AUTH" <<< "$SSHD_EFFECTIVE"
+grep -Fqx "permitemptypasswords $SSH_EMPTY_PASSWORDS" <<< "$SSHD_EFFECTIVE"
+grep -Fqx "usepam $SSH_USE_PAM" <<< "$SSHD_EFFECTIVE"
+grep -Eq '^listenaddress 172[.]16[.]42[.]1(:22)?
+
+USED_MB="$(sudo du -sm "$ROOTFS" | awk '{print $1}')"; IMAGE_MB=$((USED_MB + 200)); [ "$IMAGE_MB" -ge 1536 ] || IMAGE_MB=1536
+ROOTFS_IMG="$OUT_DIR/crux-channel-rootfs.ext4"
+truncate -s "${IMAGE_MB}M" "$ROOTFS_IMG"
+sudo mkfs.ext4 -F -m 0 -L "$ROOTFS_LABEL" -U "$CHANNEL_ROOT_UUID" -d "$ROOTFS" "$ROOTFS_IMG"
+sudo e2fsck -fn "$ROOTFS_IMG"
+test "$(blkid -p -o value -s UUID "$ROOTFS_IMG")" = "$CHANNEL_ROOT_UUID"
+zstd -T0 -10 -f "$ROOTFS_IMG" -o "$ROOTFS_IMG.zst"; rm -f "$ROOTFS_IMG"
+{
+ echo "distro=$DISTRO"; echo "release=3.8-arm64"; echo "architecture=arm64"; echo "kernel_release=$KREL"; echo "rootfs_label=$ROOTFS_LABEL"; echo "rootfs_uuid=$CHANNEL_ROOT_UUID";
+ echo "usb_device_ip=172.16.42.1"; echo "ssh_auth=$SSH_AUTH_MODE"; echo "ssh_listen=172.16.42.1"; echo "network_manager=none"; echo "usb_dhcp=none-host-static-required"; echo "wifi_firmware=stock-modem-vendor-readonly";
+} > "$OUT_DIR/build-info.txt"
+(cd "$OUT_DIR" && sha256sum crux-channel-rootfs.ext4.zst build-info.txt > SHA256SUMS.crux)
+ <<< "$SSHD_EFFECTIVE"
+if [ "$ALLOW_EMPTY_SSH" -eq 1 ]; then
+  sudo grep -q '^root::' "$ROOTFS/etc/shadow"
+fi
+
 sudo rm -f "$ROOTFS/usr/bin/qemu-aarch64-static"
+sudo umount "$ROOTFS/proc"
+sudo umount "$ROOTFS/dev"
+trap - EXIT
+sudo rm -rf "$ROOTFS/usr/ports/opt/nettle" "$ROOTFS/usr/ports/opt/dnsmasq"
+echo "::endgroup::"
 
 USED_MB="$(sudo du -sm "$ROOTFS" | awk '{print $1}')"; IMAGE_MB=$((USED_MB + 200)); [ "$IMAGE_MB" -ge 1536 ] || IMAGE_MB=1536
 ROOTFS_IMG="$OUT_DIR/crux-channel-rootfs.ext4"
