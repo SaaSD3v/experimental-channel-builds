@@ -1,0 +1,21 @@
+name: Build GENTOO rootfs (USB open root)
+
+on:
+  workflow_dispatch:
+    inputs:
+      reuse_kernel:
+        description: Reuse latest prebuilt kernel instead of compiling current source
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  rootfs:
+    uses: ./.github/workflows/gentoo.yml
+    with:
+      ssh_auth: open-root-usb
+      reuse_kernel: ${{ inputs.reuse_kernel }}
+    secrets: inherit
