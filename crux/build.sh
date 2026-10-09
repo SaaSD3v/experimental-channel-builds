@@ -175,21 +175,7 @@ grep -Fqx "pubkeyauthentication $SSH_PUBKEY" <<< "$SSHD_EFFECTIVE"
 grep -Fqx "passwordauthentication $SSH_PASSWORD_AUTH" <<< "$SSHD_EFFECTIVE"
 grep -Fqx "permitemptypasswords $SSH_EMPTY_PASSWORDS" <<< "$SSHD_EFFECTIVE"
 grep -Fqx "usepam $SSH_USE_PAM" <<< "$SSHD_EFFECTIVE"
-grep -Eq '^listenaddress 172[.]16[.]42[.]1(:22)?
-
-USED_MB="$(sudo du -sm "$ROOTFS" | awk '{print $1}')"; IMAGE_MB=$((USED_MB + 200)); [ "$IMAGE_MB" -ge 1536 ] || IMAGE_MB=1536
-ROOTFS_IMG="$OUT_DIR/crux-channel-rootfs.ext4"
-truncate -s "${IMAGE_MB}M" "$ROOTFS_IMG"
-sudo mkfs.ext4 -F -m 0 -L "$ROOTFS_LABEL" -U "$CHANNEL_ROOT_UUID" -d "$ROOTFS" "$ROOTFS_IMG"
-sudo e2fsck -fn "$ROOTFS_IMG"
-test "$(blkid -p -o value -s UUID "$ROOTFS_IMG")" = "$CHANNEL_ROOT_UUID"
-zstd -T0 -10 -f "$ROOTFS_IMG" -o "$ROOTFS_IMG.zst"; rm -f "$ROOTFS_IMG"
-{
- echo "distro=$DISTRO"; echo "release=3.8-arm64"; echo "architecture=arm64"; echo "kernel_release=$KREL"; echo "rootfs_label=$ROOTFS_LABEL"; echo "rootfs_uuid=$CHANNEL_ROOT_UUID";
- echo "usb_device_ip=172.16.42.1"; echo "ssh_auth=$SSH_AUTH_MODE"; echo "ssh_listen=172.16.42.1"; echo "network_manager=none"; echo "usb_dhcp=none-host-static-required"; echo "wifi_firmware=stock-modem-vendor-readonly";
-} > "$OUT_DIR/build-info.txt"
-(cd "$OUT_DIR" && sha256sum crux-channel-rootfs.ext4.zst build-info.txt > SHA256SUMS.crux)
- <<< "$SSHD_EFFECTIVE"
+grep -Eq '^listenaddress 172[.]16[.]42[.]1(:22)?$' <<< "$SSHD_EFFECTIVE"
 if [ "$ALLOW_EMPTY_SSH" -eq 1 ]; then
   sudo grep -q '^root::' "$ROOTFS/etc/shadow"
 fi
@@ -210,6 +196,6 @@ test "$(blkid -p -o value -s UUID "$ROOTFS_IMG")" = "$CHANNEL_ROOT_UUID"
 zstd -T0 -10 -f "$ROOTFS_IMG" -o "$ROOTFS_IMG.zst"; rm -f "$ROOTFS_IMG"
 {
  echo "distro=$DISTRO"; echo "release=3.8-arm64"; echo "architecture=arm64"; echo "kernel_release=$KREL"; echo "rootfs_label=$ROOTFS_LABEL"; echo "rootfs_uuid=$CHANNEL_ROOT_UUID";
- echo "usb_device_ip=172.16.42.1"; echo "ssh_auth=$SSH_AUTH_MODE"; echo "ssh_listen=172.16.42.1"; echo "network_manager=none"; echo "usb_dhcp=none-host-static-required"; echo "wifi_firmware=stock-modem-vendor-readonly";
+ echo "usb_device_ip=172.16.42.1"; echo "ssh_auth=$SSH_AUTH_MODE"; echo "ssh_listen=172.16.42.1"; echo "network_manager=none"; echo "usb_dhcp=dnsmasq"; echo "usb_dhcp_range=172.16.42.2-172.16.42.20"; echo "wifi_firmware=stock-modem-vendor-readonly";
 } > "$OUT_DIR/build-info.txt"
 (cd "$OUT_DIR" && sha256sum crux-channel-rootfs.ext4.zst build-info.txt > SHA256SUMS.crux)
