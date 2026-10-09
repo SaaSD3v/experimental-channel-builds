@@ -220,8 +220,15 @@ if [ "$ALLOW_EMPTY_SSH" -eq 1 ]; then
   sudo grep -q '^root::' "$ROOTFS/etc/shadow"
 fi
 sudo rm -f "$ROOTFS/usr/bin/qemu-aarch64-static" "$ROOTFS/tmp/$DNSMASQ_PKG"
-cleanup_crux_dev
+# Success path must fail the build if the host /dev cannot be detached.
+# Otherwise mkfs.ext4 -d could include the host's device tree by accident.
+sudo umount "$ROOTFS/dev"
 trap - EXIT
+test -c "$ROOTFS/dev/null"
+if mountpoint -q "$ROOTFS/dev"; then
+  echo "CRUX /dev is still bind-mounted; refusing to create the ext4 image" >&2
+  exit 1
+fi
 echo "::endgroup::"
 
 USED_MB="$(sudo du -sm "$ROOTFS" | awk '{print $1}')"; IMAGE_MB=$((USED_MB + 200)); [ "$IMAGE_MB" -ge 1536 ] || IMAGE_MB=1536
