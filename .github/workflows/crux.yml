@@ -73,7 +73,8 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             git ca-certificates curl rsync tar gzip xz-utils zstd \
             e2fsprogs qemu-user-static binfmt-support \
-            openssh-client openssl kmod file device-tree-compiler
+            openssh-client openssl kmod file device-tree-compiler \
+            gcc-aarch64-linux-gnu
           sudo update-binfmts --enable qemu-aarch64
           command -v qemu-aarch64-static
           command -v gh
