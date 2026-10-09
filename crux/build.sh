@@ -131,32 +131,46 @@ if [ ! -c "$ROOTFS/dev/null" ] || [ -L "$ROOTFS/dev/null" ]; then
 fi
 sudo test -c "$ROOTFS/dev/null"
 
-# Install the official CRUX 3.8 dnsmasq package and dependency in the
-# ARM64 target. This keeps the package registered in CRUX's package database.
-echo "::group::Install CRUX ARM64 USB DHCP"
-for port in nettle dnsmasq; do
-  sudo mkdir -p "$ROOTFS/usr/ports/opt/$port"
-  sudo rsync -a "crux.nu::ports/crux-3.8/opt/$port/" "$ROOTFS/usr/ports/opt/$port/"
-done
-sudo rm -f "$ROOTFS/etc/resolv.conf"
-sudo cp -L /etc/resolv.conf "$ROOTFS/etc/resolv.conf"
-sudo mkdir -p "$ROOTFS/proc"
-cleanup_chroot_mounts() {
-  sudo umount "$ROOTFS/proc" 2>/dev/null || true
-  sudo umount "$ROOTFS/dev" 2>/dev/null || true
-}
-trap cleanup_chroot_mounts EXIT
-sudo mount --bind /dev "$ROOTFS/dev"
-sudo mount -t proc proc "$ROOTFS/proc"
-sudo update-binfmts --enable qemu-aarch64 || true
-sudo install -m 0755 /usr/bin/qemu-aarch64-static "$ROOTFS/usr/bin/qemu-aarch64-static"
-sudo chroot "$ROOTFS" /bin/sh -lc 'prt-get info dnsmasq && prt-get depinst dnsmasq'
-sudo test -x "$ROOTFS/usr/sbin/dnsmasq"
-sudo test -x "$ROOTFS/etc/rc.d/dnsmasq"
+# Cross-build dnsmasq for CRUX ARM64 on the x86 runner. The stock CRUX port
+# enables DNSSEC and pulls in nettle; DHCP-only doesn't need those libraries.
+# Native ARM64 port compilation under qemu-user exhausted memory in CI.
+echo "::group::Build CRUX ARM64 USB DHCP package"
+DNSMASQ_VERSION=2.93
+DNSMASQ_TARBALL="$WORK_DIR/dnsmasq-$DNSMASQ_VERSION.tar.xz"
+DNSMASQ_SRC="$WORK_DIR/dnsmasq-$DNSMASQ_VERSION"
+DNSMASQ_PKG_DIR="$WORK_DIR/dnsmasq-package"
+DNSMASQ_PKG="dnsmasq#${DNSMASQ_VERSION}-1.pkg.tar.gz"
+curl -fsSL --retry 3 "https://dnsmasq.org/dnsmasq-$DNSMASQ_VERSION.tar.xz" -o "$DNSMASQ_TARBALL"
+echo "0c00d4e5c97c8306e5fb932b348b34269c9c29a0e7df0e8e82958b407092bc19  $DNSMASQ_TARBALL" | sha256sum -c -
+tar -xJf "$DNSMASQ_TARBALL" -C "$WORK_DIR"
+make -C "$DNSMASQ_SRC" -j2 CC=aarch64-linux-gnu-gcc COPTS='-DNO_TFTP'
+sudo rm -rf "$DNSMASQ_PKG_DIR"
+mkdir -p "$DNSMASQ_PKG_DIR/usr/sbin" "$DNSMASQ_PKG_DIR/etc/rc.d" "$DNSMASQ_PKG_DIR/etc"
+install -m 0755 "$DNSMASQ_SRC/src/dnsmasq" "$DNSMASQ_PKG_DIR/usr/sbin/dnsmasq"
+test "$(aarch64-linux-gnu-readelf -h "$DNSMASQ_PKG_DIR/usr/sbin/dnsmasq" | awk '/Machine:/{print $2}')" = AArch64
+if aarch64-linux-gnu-readelf -d "$DNSMASQ_PKG_DIR/usr/sbin/dnsmasq" | grep -E 'NEEDED.*(nettle|hogweed|gmp)'; then
+  echo "DHCP build unexpectedly links external DNSSEC libraries" >&2
+  exit 1
+fi
 
-# DHCP is available only over the USB RNDIS management link; no DNS or
-# default gateway is advertised to the Windows computer.
-sudo tee "$ROOTFS/etc/dnsmasq.conf" >/dev/null <<'DNSMASQ'
+# Use the CRUX BSD-style start-stop-daemon convention.
+cat > "$DNSMASQ_PKG_DIR/etc/rc.d/dnsmasq" <<'SERVICE'
+#!/bin/sh
+SSD=/sbin/start-stop-daemon
+PROG=/usr/sbin/dnsmasq
+PID=/run/dnsmasq.pid
+case "$1" in
+  start) "$SSD" --start --pidfile "$PID" --exec "$PROG" ;;
+  stop) "$SSD" --stop --remove-pidfile --retry 10 --pidfile "$PID" --name dnsmasq ;;
+  restart) "$0" stop && "$0" start ;;
+  *) echo "usage: $0 {start|stop|restart}" >&2; exit 1 ;;
+esac
+SERVICE
+chmod 0755 "$DNSMASQ_PKG_DIR/etc/rc.d/dnsmasq"
+
+# DHCP serves only the RNDIS management interface. Empty options 3 and 6
+# prevent Windows from treating this USB link as its default route or DNS.
+cat > "$DNSMASQ_PKG_DIR/etc/dnsmasq.conf" <<'DNSMASQ'
 port=0
 interface=usb0
 bind-dynamic
@@ -165,10 +179,26 @@ dhcp-authoritative
 dhcp-option=3
 dhcp-option=6
 DNSMASQ
-sudo chroot "$ROOTFS" /usr/sbin/dnsmasq --test
-sudo chroot "$ROOTFS" /bin/sh -lc 'mkdir -p /run/sshd; sshd -t'
+(
+  cd "$DNSMASQ_PKG_DIR"
+  tar -czf "$WORK_DIR/$DNSMASQ_PKG" .
+)
+sudo install -m 0644 "$WORK_DIR/$DNSMASQ_PKG" "$ROOTFS/tmp/$DNSMASQ_PKG"
 
-# sshd -t checks syntax only; confirm the effective config and chosen mode.
+# Let CRUX pkgadd record the native ARM64 binary and rc files in its own
+# package database. No port sources or host build dependencies reach the image.
+sudo update-binfmts --enable qemu-aarch64 || true
+sudo install -m 0755 /usr/bin/qemu-aarch64-static "$ROOTFS/usr/bin/qemu-aarch64-static"
+sudo chroot "$ROOTFS" /bin/sh -ec '
+  pkgadd "/tmp/'"$DNSMASQ_PKG"'"
+  test -x /usr/sbin/dnsmasq
+  test -x /etc/rc.d/dnsmasq
+  /usr/sbin/dnsmasq --test
+  mkdir -p /run/sshd
+  sshd -t
+'
+
+# Check what sshd will actually use, not only whether the file parses.
 SSHD_EFFECTIVE="$(sudo chroot "$ROOTFS" /usr/sbin/sshd -T -C user=root,host=channel,addr=172.16.42.2,laddr=172.16.42.1,lport=22)"
 grep -Fqx "permitrootlogin $SSH_ROOT_LOGIN" <<< "$SSHD_EFFECTIVE"
 grep -Fqx "pubkeyauthentication $SSH_PUBKEY" <<< "$SSHD_EFFECTIVE"
@@ -179,12 +209,7 @@ grep -Eq '^listenaddress 172[.]16[.]42[.]1(:22)?$' <<< "$SSHD_EFFECTIVE"
 if [ "$ALLOW_EMPTY_SSH" -eq 1 ]; then
   sudo grep -q '^root::' "$ROOTFS/etc/shadow"
 fi
-
-sudo rm -f "$ROOTFS/usr/bin/qemu-aarch64-static"
-sudo umount "$ROOTFS/proc"
-sudo umount "$ROOTFS/dev"
-trap - EXIT
-sudo rm -rf "$ROOTFS/usr/ports/opt/nettle" "$ROOTFS/usr/ports/opt/dnsmasq"
+sudo rm -f "$ROOTFS/usr/bin/qemu-aarch64-static" "$ROOTFS/tmp/$DNSMASQ_PKG"
 echo "::endgroup::"
 
 USED_MB="$(sudo du -sm "$ROOTFS" | awk '{print $1}')"; IMAGE_MB=$((USED_MB + 200)); [ "$IMAGE_MB" -ge 1536 ] || IMAGE_MB=1536
