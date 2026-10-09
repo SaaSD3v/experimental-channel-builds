@@ -181,7 +181,7 @@ dhcp-option=6
 DNSMASQ
 (
   cd "$DNSMASQ_PKG_DIR"
-  tar -czf "$WORK_DIR/$DNSMASQ_PKG" .
+  tar -czf "$WORK_DIR/$DNSMASQ_PKG" etc usr
 )
 sudo install -m 0644 "$WORK_DIR/$DNSMASQ_PKG" "$ROOTFS/tmp/$DNSMASQ_PKG"
 
