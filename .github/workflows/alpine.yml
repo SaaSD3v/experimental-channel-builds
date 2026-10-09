@@ -19,11 +19,16 @@ on:
           - public-key-secret+password-secret
           - open-root-usb
       ssh_public_key:
-        description: Public key to install when using a public-key-input mode
+        description: Optional - only for public-key-input modes; leave empty for open-root-usb
         required: false
         type: string
+      reuse_kernel:
+        description: Reuse compiled kernel artifact (on keeps the existing behavior)
+        type: boolean
+        required: true
+        default: true
       kernel_run_id:
-        description: Optional Build mainline kernel run ID; empty uses the latest successful run
+        description: Optional run ID if reuse is on; empty uses latest live artifact
         required: false
         type: string
 
@@ -80,8 +85,18 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REQUESTED_RUN_ID: ${{ inputs.kernel_run_id }}
+          REUSE_KERNEL: ${{ github.event_name != 'workflow_dispatch' || inputs.reuse_kernel }}
         run: |
           set -euxo pipefail
+          if [ "$REUSE_KERNEL" = "false" ]; then
+            if [ -n "$REQUESTED_RUN_ID" ]; then
+              echo "::error::kernel_run_id only applies when kernel reuse is enabled." >&2
+              exit 1
+            fi
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            echo "Kernel reuse disabled; building current kernel source."
+            exit 0
+          fi
 
           artifact_for_run() {
             gh api "repos/$GITHUB_REPOSITORY/actions/runs/$1/artifacts" \
