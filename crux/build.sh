@@ -112,6 +112,16 @@ test -d "$ROOTFS/lib/modules/$KREL" || test -d "$ROOTFS/usr/lib/modules/$KREL"
 sudo depmod -b "$ROOTFS" "$KREL"
 sudo mkdir -p "$ROOTFS/boot"; sudo cp "$KERNEL_CONFIG_FILE" "$ROOTFS/boot/config-$KREL"; sudo cp "$KERNEL_SYSTEM_MAP_FILE" "$ROOTFS/boot/System.map-$KREL"
 
+# CRUX's rootfs tarball does not include /dev/null. OpenSSH needs it
+# when validating sshd inside the ARM64 chroot, even though devtmpfs
+# will later provide /dev on the running device.
+sudo install -d -m 0755 "$ROOTFS/dev"
+if [ ! -c "$ROOTFS/dev/null" ] || [ -L "$ROOTFS/dev/null" ]; then
+  sudo rm -f "$ROOTFS/dev/null"
+  sudo mknod -m 0666 "$ROOTFS/dev/null" c 1 3
+fi
+sudo test -c "$ROOTFS/dev/null"
+
 sudo update-binfmts --enable qemu-aarch64 || true
 sudo install -m 0755 /usr/bin/qemu-aarch64-static "$ROOTFS/usr/bin/qemu-aarch64-static"
 sudo chroot "$ROOTFS" /bin/sh -lc 'mkdir -p /run/sshd; sshd -t'
