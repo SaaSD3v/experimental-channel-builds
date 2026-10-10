@@ -1,53 +1,47 @@
-# Fedora 44 / systemd — Channel experimental
+# Fedora — Channel
 
-Experimental ARM64 rootfs builder using the shared Channel mainline kernel checkpoint.
+Experimental Fedora ARM64 rootfs for the Motorola Moto G7 Play.
 
-- Rootfs label: `fedora`
-- Rootfs UUID: `89530000-6320-4000-8000-000000000001`
-- Boot locator remains the Android `userdata` PARTUUID in `boot-channel.img`.
-- If no reusable kernel artifact exists, this workflow builds the kernel temporarily and uploads only the rootfs.
+## Build
 
-Imagem desta branch: `fedora-channel-rootfs.ext4.zst` (artefato `channel-fedora-rootfs`).
+This branch uses `fedora/build.sh` and `.github/workflows/fedora.yml`.
 
----
+The rootfs uses systemd and includes modules matching the Channel mainline kernel.
 
-## Ext4 raw e Android sparse: verificar e gravar
+The artifact is `channel-fedora-rootfs`.
 
-**Somente a imagem `fedora`.** Extraia o ZIP do artefato GitHub e execute no **computador**:
+## Image
 
-~~~sh
+Download `fedora-channel-rootfs.ext4.zst` and extract the raw ext4 image:
+
+```sh
 zstd -d -k fedora-channel-rootfs.ext4.zst
-file fedora-channel-rootfs.ext4
-~~~
+```
 
-Se `file` indicar **ext4 raw**, converta para sparse se necessário:
+Use the existing Channel boot setup to deploy the rootfs.
 
-~~~sh
-img2simg fedora-channel-rootfs.ext4 fedora-sparse.img
-fastboot flash userdata fedora-sparse.img
-~~~
+After boot, `df -h /` shows available space. Confirm the root partition with `findmnt -n -o SOURCE,FSTYPE /` before using `resize2fs` if expansion is needed.
 
-Se já for **Android sparse**, não converta novamente: `fastboot flash userdata fedora-channel-rootfs.ext4`. Alguns fastboots também gravam diretamente o ext4 raw: `fastboot flash userdata fedora-channel-rootfs.ext4`. Para transformar sparse em raw no computador: `simg2img fedora-sparse.img fedora-extraido.ext4` (em Debian/Ubuntu, pacote `android-sdk-libsparse-utils`).
+## Network
 
-**O flash substitui os dados existentes em `userdata`.** Faça backup e confirme o destino. Sparse é formato de transporte e não expande o filesystem.
+Connect over the USB gadget at `172.16.42.1`:
 
----
+```sh
+ssh root@172.16.42.1
+```
 
-## Expandir o ext4 do `/` para a partição
+With working Wi-Fi, NetworkManager provides:
 
-Depois do primeiro boot, no **telefone**, como root, identifique origem, tipo e espaço:
+```sh
+nmcli device wifi list
+nmcli --ask device wifi connect "SSID" ifname wlan0
+```
 
-~~~sh
-findmnt -n -o SOURCE,FSTYPE /
-lsblk -o NAME,SIZE,FSTYPE,MOUNTPOINTS
-df -h /
-~~~
+## Time
 
-**Apenas se `/` for ext4 e a partição root estiver corretamente identificada**, use o dispositivo real no lugar do marcador:
+To correct an incorrect clock, enter the actual UTC time:
 
-~~~sh
-resize2fs /dev/PARTICAO_ROOT_CONFIRMADA
-df -h /
-~~~
-
-`resize2fs` sem tamanho cresce até o limite da partição, quando o kernel suporta redimensionamento online. Não execute `e2fsck` no `/` montado. Se faltar a ferramenta ou falhar online, use recuperação com ext4 desmontado e backup. A expansão não altera a tabela de partições.
+```sh
+date -u -s "YYYY-MM-DD HH:MM:SS"
+date
+```
