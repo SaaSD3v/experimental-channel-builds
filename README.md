@@ -47,6 +47,25 @@ apk add android-tools-img2simg  # Android sparse converter (community)
 
 The build outputs raw ext4, without sparse conversion.
 
+## Optional Android sparse tools
+
+These builds output raw ext4. Sparse conversion is optional and does not replace the existing Channel boot process.
+
+Install on Alpine (community) before converting an image:
+
+```sh
+apk add android-tools-img2simg android-tools-simg2img
+```
+
+After decompressing the matching rootfs image:
+
+```sh
+img2simg alpine-channel-rootfs.ext4 rootfs-sparse.img
+simg2img rootfs-sparse.img rootfs-restored.ext4
+```
+
+`img2simg` converts raw to sparse; `simg2img` converts sparse back to raw. Enable Alpine's community repository if the split packages are not found.
+
 ## Rootfs details
 
 - Artifact: `channel-alpine-rootfs`
