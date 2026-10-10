@@ -216,22 +216,7 @@ jobs:
           test -s out/crux-channel-rootfs.ext4.zst
           grep -Fqx 'distro=crux' out/build-info.txt
           grep -Fqx 'rootfs_label=crux' out/build-info.txt
-          grep -Eq '^rootfs_uuid=[0-9a-fA-F-]{36}
-          grep -Fqx 'network_manager=none' out/build-info.txt
-          grep -Fqx 'ssh_auth=ssh' out/build-info.txt
-          grep -q '^ssh_listen=172.16.42.1$' out/build-info.txt
-
-      - name: Upload CRUX rootfs
-        uses: actions/upload-artifact@v4
-        with:
-          name: channel-crux-rootfs
-          path: |
-            out/crux-channel-rootfs.ext4.zst
-            out/build-info.txt
-            out/SHA256SUMS.crux
-          if-no-files-found: error
-          retention-days: 14
- out/build-info.txt
+          grep -Eq '^rootfs_uuid=[0-9a-fA-F-]{36}$' out/build-info.txt
           grep -Fqx 'network_manager=none' out/build-info.txt
           grep -Fqx 'ssh_auth=ssh' out/build-info.txt
           grep -q '^ssh_listen=172.16.42.1$' out/build-info.txt
