@@ -25,7 +25,6 @@ env:
   DISTRO: crux
   ARCH: arm64
   ROOTFS_LABEL: crux
-  ROOTFS_UUID: 89530000-6320-4000-8000-000000000001
   KERNEL_URL: https://github.com/SaaSD3v/linux.git
   KERNEL_REF: msm8953/latest
 
@@ -208,7 +207,6 @@ jobs:
         env:
           DISTRO: ${{ env.DISTRO }}
           ROOTFS_LABEL: ${{ env.ROOTFS_LABEL }}
-          ROOTFS_UUID: ${{ env.ROOTFS_UUID }}
           KERNEL_RELEASE: ${{ env.KERNEL_RELEASE }}
           KERNEL_MODULES_ARCHIVE: ${{ env.KERNEL_MODULES_ARCHIVE }}
           KERNEL_CONFIG_FILE: ${{ env.KERNEL_CONFIG_FILE }}
@@ -223,7 +221,22 @@ jobs:
           test -s out/crux-channel-rootfs.ext4.zst
           grep -Fqx 'distro=crux' out/build-info.txt
           grep -Fqx 'rootfs_label=crux' out/build-info.txt
-          grep -Fqx "rootfs_uuid=$ROOTFS_UUID" out/build-info.txt
+          grep -Eq '^rootfs_uuid=[0-9a-fA-F-]{36}
+          grep -Fqx 'network_manager=none' out/build-info.txt
+          grep -Fqx 'ssh_auth=ssh' out/build-info.txt
+          grep -q '^ssh_listen=172.16.42.1$' out/build-info.txt
+
+      - name: Upload CRUX rootfs
+        uses: actions/upload-artifact@v4
+        with:
+          name: channel-crux-rootfs
+          path: |
+            out/crux-channel-rootfs.ext4.zst
+            out/build-info.txt
+            out/SHA256SUMS.crux
+          if-no-files-found: error
+          retention-days: 14
+ out/build-info.txt
           grep -Fqx 'network_manager=none' out/build-info.txt
           grep -Fqx 'ssh_auth=ssh' out/build-info.txt
           grep -q '^ssh_listen=172.16.42.1$' out/build-info.txt
