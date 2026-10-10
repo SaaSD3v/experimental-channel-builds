@@ -9,7 +9,6 @@ set -euo pipefail
 
 DISTRO="${DISTRO:-gentoo}"
 ROOTFS_LABEL="${ROOTFS_LABEL:-gentoo}"
-CHANNEL_ROOT_UUID="${ROOTFS_UUID:-89530000-6320-4000-8000-000000000001}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WORK_DIR="${WORK_DIR:-$REPO_ROOT/.work}"
 ROOTFS="$WORK_DIR/rootfs"
@@ -53,7 +52,7 @@ sudo tee "$ROOTFS/etc/hosts" >/dev/null <<'HOSTS'
 ::1 localhost ip6-localhost ip6-loopback
 HOSTS
 sudo tee "$ROOTFS/etc/fstab" >/dev/null <<FSTAB
-UUID=$CHANNEL_ROOT_UUID / ext4 rw,noatime 0 1
+PARTLABEL=userdata / ext4 rw,noatime 0 1
 FSTAB
 
 # One SSH management mode on the USB interface.
@@ -128,9 +127,10 @@ USED_MB="$(sudo du -sm "$ROOTFS" | awk '{print $1}')"
 IMAGE_MB=$((USED_MB + 700)); if [ "$IMAGE_MB" -lt 1536 ]; then IMAGE_MB=1536; fi
 ROOTFS_IMG="$OUT_DIR/gentoo-channel-rootfs.ext4"
 truncate -s "${IMAGE_MB}M" "$ROOTFS_IMG"
-sudo mkfs.ext4 -F -m 0 -L "$ROOTFS_LABEL" -U "$CHANNEL_ROOT_UUID" -d "$ROOTFS" "$ROOTFS_IMG"
+sudo mkfs.ext4 -F -m 0 -L "$ROOTFS_LABEL" -U random -d "$ROOTFS" "$ROOTFS_IMG"
+ROOTFS_EXT4_UUID="$(blkid -p -o value -s UUID "$ROOTFS_IMG")"
+test -n "$ROOTFS_EXT4_UUID"
 sudo e2fsck -fn "$ROOTFS_IMG"
-test "$(blkid -p -o value -s UUID "$ROOTFS_IMG")" = "$CHANNEL_ROOT_UUID"
 test "$(blkid -p -o value -s LABEL "$ROOTFS_IMG")" = "$ROOTFS_LABEL"
 zstd -T0 -10 -f "$ROOTFS_IMG" -o "$ROOTFS_IMG.zst"
 rm -f "$ROOTFS_IMG"
@@ -142,7 +142,7 @@ echo "::endgroup::"
   echo "architecture=arm64"
   echo "kernel_release=$KREL"
   echo "rootfs_label=$ROOTFS_LABEL"
-  echo "rootfs_uuid=$CHANNEL_ROOT_UUID"
+  echo "rootfs_uuid=$ROOTFS_EXT4_UUID"
   echo "usb_device_ip=172.16.42.1"
   echo "usb_dhcp_range=172.16.42.2-172.16.42.20"
   echo "ssh_auth=ssh"
