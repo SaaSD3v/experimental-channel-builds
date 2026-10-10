@@ -41,48 +41,32 @@ sudo tee "$ROOTFS/etc/fstab" >/dev/null <<FSTAB
 UUID=$CHANNEL_ROOT_UUID / ext4 rw,noatime 0 1
 FSTAB
 
-SSH_AUTH_MODE="${SSH_AUTH_MODE:-generated-key}"
-SSH_PUBLIC_KEY_INPUT="${SSH_PUBLIC_KEY_INPUT:-}"; SSH_PUBLIC_KEY="${SSH_PUBLIC_KEY:-}"; SSH_PASSWORD="${SSH_PASSWORD:-}"
-rm -f "$OUT_DIR/channel_test_ed25519" "$OUT_DIR/channel_test_ed25519.pub" "$OUT_DIR/channel_ssh_password.txt"
-sudo mkdir -p "$ROOTFS/root/.ssh"; sudo chmod 0700 "$ROOTFS/root/.ssh"
-KEYFILE="$WORK_DIR/authorized_key"; rm -f "$KEYFILE"
-ALLOW_KEY=0; ALLOW_PASSWORD=0; ALLOW_EMPTY_SSH=0; ROOT_PASSWORD=""
-install_public_key(){ printf '%s\n' "$1" | tr -d '\r' > "$KEYFILE"; ssh-keygen -l -f "$KEYFILE" >/dev/null; sudo install -m 0600 "$KEYFILE" "$ROOTFS/root/.ssh/authorized_keys"; ALLOW_KEY=1; }
-generate_public_key(){ ssh-keygen -q -t ed25519 -N "" -C "channel-void-ci" -f "$OUT_DIR/channel_test_ed25519"; install_public_key "$(cat "$OUT_DIR/channel_test_ed25519.pub")"; }
-generate_password(){ ROOT_PASSWORD="$(openssl rand -hex 24)"; printf '%s\n' "$ROOT_PASSWORD" > "$OUT_DIR/channel_ssh_password.txt"; chmod 0600 "$OUT_DIR/channel_ssh_password.txt"; ALLOW_PASSWORD=1; }
-case "$SSH_AUTH_MODE" in
-  auto|generated-key) generate_public_key; SSH_AUTH_MODE=generated-key ;;
-  public-key-input) [ -n "$SSH_PUBLIC_KEY_INPUT" ] || exit 2; install_public_key "$SSH_PUBLIC_KEY_INPUT" ;;
-  public-key-secret) [ -n "$SSH_PUBLIC_KEY" ] || exit 2; install_public_key "$SSH_PUBLIC_KEY" ;;
-  generated-password) generate_password ;;
-  password-secret) [ -n "$SSH_PASSWORD" ] || exit 2; ROOT_PASSWORD="$SSH_PASSWORD"; ALLOW_PASSWORD=1 ;;
-  generated-key+generated-password) generate_public_key; generate_password ;;
-  public-key-input+password-secret) [ -n "$SSH_PUBLIC_KEY_INPUT" ] && [ -n "$SSH_PASSWORD" ] || exit 2; install_public_key "$SSH_PUBLIC_KEY_INPUT"; ROOT_PASSWORD="$SSH_PASSWORD"; ALLOW_PASSWORD=1 ;;
-  public-key-secret+password-secret) [ -n "$SSH_PUBLIC_KEY" ] && [ -n "$SSH_PASSWORD" ] || exit 2; install_public_key "$SSH_PUBLIC_KEY"; ROOT_PASSWORD="$SSH_PASSWORD"; ALLOW_PASSWORD=1 ;;
-  open-root-usb) ALLOW_EMPTY_SSH=1 ;;
-  *) exit 2 ;;
-esac
-if [ "$ALLOW_PASSWORD" -eq 1 ]; then
-  ROOT_HASH="$(openssl passwd -6 "$ROOT_PASSWORD")"; sudo sed -i "s|^root:[^:]*:|root:${ROOT_HASH}:|" "$ROOTFS/etc/shadow"
-elif [ "$ALLOW_EMPTY_SSH" -eq 1 ]; then
-  sudo sed -i 's|^root:[^:]*:|root::|' "$ROOTFS/etc/shadow"
-else
-  ROOT_HASH="$(openssl passwd -6 "$(openssl rand -hex 48)")"; sudo sed -i "s|^root:[^:]*:|root:${ROOT_HASH}:|" "$ROOTFS/etc/shadow"
-fi
-if [ "$ALLOW_EMPTY_SSH" -eq 1 ]; then SSH_ROOT_LOGIN=yes; SSH_PUBKEY=no; SSH_PASSWORD_AUTH=yes; SSH_EMPTY_PASSWORDS=yes;
-elif [ "$ALLOW_PASSWORD" -eq 1 ]; then SSH_ROOT_LOGIN=yes; SSH_PUBKEY=$([ "$ALLOW_KEY" -eq 1 ] && echo yes || echo no); SSH_PASSWORD_AUTH=yes; SSH_EMPTY_PASSWORDS=no;
-else SSH_ROOT_LOGIN=prohibit-password; SSH_PUBKEY=yes; SSH_PASSWORD_AUTH=no; SSH_EMPTY_PASSWORDS=no; fi
-sudo mkdir -p "$ROOTFS/etc/ssh/sshd_config.d"
-sudo tee "$ROOTFS/etc/ssh/sshd_config.d/10-channel-usb.conf" >/dev/null <<EOF
+# One SSH management mode on the USB interface.
+RANDOM_PASSWORD="$(openssl rand -hex 48)"
+ROOT_HASH="$(openssl passwd -6 "$RANDOM_PASSWORD")"
+sudo sed -i "s|^root:[^:]*:|root:${ROOT_HASH}:|" "$ROOTFS/etc/shadow"
+unset RANDOM_PASSWORD ROOT_HASH
+sudo mkdir -p "$ROOTFS/etc/pam.d" "$ROOTFS/etc/ssh/sshd_config.d"
+sudo tee "$ROOTFS/etc/pam.d/sshd" >/dev/null <<'PAM'
+auth required pam_permit.so
+account required pam_permit.so
+session required pam_permit.so
+PAM
+sudo tee "$ROOTFS/etc/ssh/sshd_config.d/10-channel-usb.conf" >/dev/null <<'SSH'
 ListenAddress 172.16.42.1
 AllowUsers root
-PermitRootLogin $SSH_ROOT_LOGIN
-PubkeyAuthentication $SSH_PUBKEY
-PasswordAuthentication $SSH_PASSWORD_AUTH
+PermitRootLogin yes
+PubkeyAuthentication no
+PasswordAuthentication yes
 KbdInteractiveAuthentication no
-PermitEmptyPasswords $SSH_EMPTY_PASSWORDS
+PermitEmptyPasswords yes
+UsePAM yes
 UseDNS no
-EOF
+SSH
+if ! sudo grep -Fq 'Include /etc/ssh/sshd_config.d/*.conf' "$ROOTFS/etc/ssh/sshd_config"; then
+  sudo sed -i '1iInclude /etc/ssh/sshd_config.d/*.conf' "$ROOTFS/etc/ssh/sshd_config"
+fi
+
 sudo ssh-keygen -A -f "$ROOTFS"
 
 echo "::group::Configure Void Linux services"
@@ -130,6 +114,6 @@ test "$(blkid -p -o value -s UUID "$ROOTFS_IMG")" = "$CHANNEL_ROOT_UUID"
 zstd -T0 -10 -f "$ROOTFS_IMG" -o "$ROOTFS_IMG.zst"; rm -f "$ROOTFS_IMG"
 {
  echo "distro=$DISTRO"; echo "variant=glibc-runit"; echo "architecture=arm64"; echo "kernel_release=$KREL"; echo "rootfs_label=$ROOTFS_LABEL"; echo "rootfs_uuid=$CHANNEL_ROOT_UUID";
- echo "usb_device_ip=172.16.42.1"; echo "ssh_auth=$SSH_AUTH_MODE"; echo "ssh_listen=172.16.42.1"; echo "network_manager=NetworkManager"; echo "wifi_firmware=stock-modem-vendor-readonly";
+ echo "usb_device_ip=172.16.42.1"; echo "ssh_auth=ssh"; echo "ssh_listen=172.16.42.1"; echo "network_manager=NetworkManager"; echo "wifi_firmware=stock-modem-vendor-readonly";
 } > "$OUT_DIR/build-info.txt"
 (cd "$OUT_DIR" && sha256sum void-channel-rootfs.ext4.zst build-info.txt > SHA256SUMS.void)
