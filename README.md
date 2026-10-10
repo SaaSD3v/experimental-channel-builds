@@ -27,6 +27,32 @@ date -u -s "YYYY-MM-DD HH:MM:SS"
 date
 ```
 
+## Optional Android sparse tools
+
+These builds output raw ext4. Sparse conversion is optional and does not replace the existing Channel boot process.
+
+| Linux environment | Install sparse tools |
+| --- | --- |
+| Debian | `sudo apt install android-sdk-libsparse-utils` |
+| Ubuntu | `sudo apt install android-sdk-libsparse-utils` |
+| Alpine (community) | `apk add android-tools-img2simg android-tools-simg2img` |
+| Arch Linux ARM | `sudo pacman -S android-tools` |
+| Fedora | `sudo dnf install android-tools` |
+| Gentoo | `emerge --ask dev-util/android-tools` |
+| openSUSE | `sudo zypper install android-tools` |
+| Void Linux | `sudo xbps-install -S android-tools` |
+| Chimera Linux | `apk add android-tools` |
+| CRUX (use a Debian/Ubuntu host) | `sudo apt install android-sdk-libsparse-utils` |
+
+After decompressing the matching rootfs image:
+
+```sh
+img2simg crux-channel-rootfs.ext4 rootfs-sparse.img
+simg2img rootfs-sparse.img rootfs-restored.ext4
+```
+
+`img2simg` converts raw to sparse; `simg2img` converts sparse back to raw. For CRUX, the installation command above is for a Debian/Ubuntu host, not for CRUX.
+
 ## Rootfs details
 
 | Distribution | Artifact | Image | Label |
