@@ -1,53 +1,47 @@
-# Arch Linux ARM / systemd — Channel experimental
+# Arch Linux ARM — Channel
 
-Experimental ARM64 rootfs builder using the shared Channel mainline kernel checkpoint.
+Experimental Arch Linux ARM ARM64 rootfs for the Motorola Moto G7 Play.
 
-- Rootfs label: `arch`
-- Rootfs UUID: `89530000-6320-4000-8000-000000000001`
-- Boot locator remains the Android `userdata` PARTUUID in `boot-channel.img`.
-- If no reusable kernel artifact exists, this workflow builds the kernel temporarily and uploads only the rootfs.
+## Build
 
-Imagem desta branch: `arch-channel-rootfs.ext4.zst` (artefato `channel-arch-rootfs`).
+This branch uses `arch/build.sh` and `.github/workflows/arch.yml`.
 
----
+The rootfs runs with systemd. It uses modules from a matching mainline Channel kernel build.
 
-## Preparar a imagem raw ou Android sparse
+The artifact is `channel-arch-rootfs`.
 
-**Só para o rootfs `arch`.** Depois de baixar e extrair o ZIP do artefato do GitHub Actions, no **computador**:
+## Image
 
-~~~sh
+Download `arch-channel-rootfs.ext4.zst` and extract the raw ext4 image:
+
+```sh
 zstd -d -k arch-channel-rootfs.ext4.zst
-file arch-channel-rootfs.ext4
-~~~
+```
 
-Se `file` identificar **ext4 raw**, converta para Android sparse quando necessário:
+Deployment follows the existing Channel boot setup. No separate flashing instructions are needed here.
 
-~~~sh
-img2simg arch-channel-rootfs.ext4 arch-sparse.img
-fastboot flash userdata arch-sparse.img
-~~~
+After boot, check root space with `df -h /`. If necessary, confirm the ext4 root device with `findmnt -n -o SOURCE,FSTYPE /` before using `resize2fs`.
 
-Se a imagem já for **Android sparse**, **não a converta outra vez**; use `fastboot flash userdata arch-channel-rootfs.ext4`. Alguns fastboots também aceitam ext4 raw diretamente com `fastboot flash userdata arch-channel-rootfs.ext4`. Para inspecionar um sparse como raw no computador: `simg2img arch-sparse.img arch-extraido.ext4` (no Debian/Ubuntu, ferramentas do pacote `android-sdk-libsparse-utils`).
+## Network
 
-**O flash de `userdata` apaga o conteúdo anterior.** Verifique a partição, a imagem de boot correspondente e os backups. Sparse não modifica o tamanho do filesystem.
+SSH access is available through the USB gadget at `172.16.42.1`:
 
----
+```sh
+ssh root@172.16.42.1
+```
 
-## Expandir o filesystem ext4 do `/`
+With a working Wi-Fi interface, NetworkManager provides:
 
-Após iniciar o Linux no **Moto G7 Play**, como root, confira primeiro a origem e o formato de `/`:
+```sh
+nmcli device wifi list
+nmcli --ask device wifi connect "SSID" ifname wlan0
+```
 
-~~~sh
-findmnt -n -o SOURCE,FSTYPE /
-lsblk -o NAME,SIZE,FSTYPE,MOUNTPOINTS
-df -h /
-~~~
+## Time
 
-**Somente se `/` for ext4 e a partição de root estiver comprovadamente correta**, substitua o marcador pelo dispositivo real:
+If the device clock needs correction, set the actual UTC time:
 
-~~~sh
-resize2fs /dev/PARTICAO_ROOT_CONFIRMADA
-df -h /
-~~~
-
-Sem tamanho, `resize2fs` pode expandir o ext4 até o espaço da partição existente (se o kernel suportar crescimento online). Não rode `e2fsck` em filesystem montado. Se o utilitário faltar ou a expansão online não for suportada, use recuperação com filesystem desmontado e backup. Não altere a tabela GPT apenas para expandir `/`.
+```sh
+date -u -s "YYYY-MM-DD HH:MM:SS"
+date
+```
