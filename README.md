@@ -10,18 +10,6 @@ The rootfs uses systemd and includes modules matching the Channel mainline kerne
 
 The artifact is `channel-opensuse-rootfs`.
 
-## Image
-
-Download `opensuse-channel-rootfs.ext4.zst` and extract the raw ext4 image:
-
-```sh
-zstd -d -k opensuse-channel-rootfs.ext4.zst
-```
-
-Use the existing Channel boot setup to deploy the rootfs.
-
-After boot, `df -h /` shows available space. Confirm the root partition with `findmnt -n -o SOURCE,FSTYPE /` before using `resize2fs` if expansion is needed.
-
 ## Network
 
 Connect over the USB gadget at `172.16.42.1`:
@@ -45,3 +33,11 @@ To correct an incorrect clock, enter the actual UTC time:
 date -u -s "YYYY-MM-DD HH:MM:SS"
 date
 ```
+
+## Rootfs details
+
+- Artifact: `channel-opensuse-rootfs`
+- Image: `opensuse-channel-rootfs.ext4.zst`
+- Format: ext4 (raw, zstd-compressed)
+- Label: `opensuse`
+- UUID: `89530000-6320-4000-8000-000000000001`
