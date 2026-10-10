@@ -224,22 +224,7 @@ jobs:
           test -s out/debian-channel-rootfs.ext4.zst
           grep -Fqx 'distro=debian' out/build-info.txt
           grep -Fqx 'rootfs_label=debian' out/build-info.txt
-          grep -Eq '^rootfs_uuid=[0-9a-fA-F-]{36}
-          grep -Fqx 'network_manager=NetworkManager' out/build-info.txt
-          grep -Fqx 'ssh_auth=ssh' out/build-info.txt
-          grep -q '^ssh_listen=172.16.42.1$' out/build-info.txt
-
-      - name: Upload Debian rootfs
-        uses: actions/upload-artifact@v4
-        with:
-          name: channel-debian-rootfs
-          path: |
-            out/debian-channel-rootfs.ext4.zst
-            out/build-info.txt
-            out/SHA256SUMS.debian
-          if-no-files-found: error
-          retention-days: 14
- out/build-info.txt
+          grep -Eq '^rootfs_uuid=[0-9a-fA-F-]{36}$' out/build-info.txt
           grep -Fqx 'network_manager=NetworkManager' out/build-info.txt
           grep -Fqx 'ssh_auth=ssh' out/build-info.txt
           grep -q '^ssh_listen=172.16.42.1$' out/build-info.txt
