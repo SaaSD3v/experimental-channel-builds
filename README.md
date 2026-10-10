@@ -10,18 +10,6 @@ The rootfs runs with OpenRC. It uses modules from a matching mainline Channel ke
 
 The artifact is `channel-alpine-rootfs`.
 
-## Image
-
-Download `alpine-channel-rootfs.ext4.zst` and extract the raw ext4 image:
-
-```sh
-zstd -d -k alpine-channel-rootfs.ext4.zst
-```
-
-Deployment follows the existing Channel boot setup. No separate flashing instructions are needed here.
-
-After boot, check root space with `df -h /`. If necessary, confirm the ext4 root device with `findmnt -n -o SOURCE,FSTYPE /` before using `resize2fs`.
-
 ## Network
 
 SSH access is available through the USB gadget at `172.16.42.1`:
@@ -45,3 +33,24 @@ If the device clock needs correction, set the actual UTC time:
 date -u -s "YYYY-MM-DD HH:MM:SS"
 date
 ```
+
+## Alpine utilities
+
+Without `findmnt`, inspect the root mount using `grep ' / ' /proc/mounts`.
+
+Optional packages:
+
+```sh
+apk add e2fsprogs-extra          # resize2fs
+apk add android-tools-img2simg  # Android sparse converter (community)
+```
+
+The build outputs raw ext4, without sparse conversion.
+
+## Rootfs details
+
+- Artifact: `channel-alpine-rootfs`
+- Image: `alpine-channel-rootfs.ext4.zst`
+- Format: ext4 (raw, zstd-compressed)
+- Label: `alpine`
+- UUID: `89530000-6320-4000-8000-000000000001`
