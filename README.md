@@ -1,52 +1,47 @@
-# Ubuntu 26.04.1 / systemd — Channel experimental
+# Ubuntu — Channel
 
-Rootfs experimental ARM64 para Moto G7 Play (`channel`), branch `ubuntu`.
+Experimental Ubuntu ARM64 rootfs for the Motorola Moto G7 Play.
 
-- Fonte do kernel: `SaaSD3v/linux`, `msm8953/latest`.
-- Workflow: `.github/workflows/ubuntu.yml`; script: `ubuntu/build.sh`.
-- Artefato: `channel-ubuntu-rootfs`; imagem: `ubuntu-channel-rootfs.ext4.zst`.
-- Label ext4: `ubuntu`; UUID ext4: `89530000-6320-4000-8000-000000000001`.
-- Kernel, módulos e DTB são do fluxo compartilhado; boot direto por `userdata`, sem initramfs.
+## Build
 
----
+This branch uses `ubuntu/build.sh` and `.github/workflows/ubuntu.yml`.
 
-## Ext4 raw e Android sparse: verificar e gravar
+The rootfs uses systemd and includes modules matching the Channel mainline kernel.
 
-**Somente a imagem `ubuntu`.** Extraia o ZIP do artefato GitHub e execute no **computador**:
+The artifact is `channel-ubuntu-rootfs`.
 
-~~~sh
+## Image
+
+Download `ubuntu-channel-rootfs.ext4.zst` and extract the raw ext4 image:
+
+```sh
 zstd -d -k ubuntu-channel-rootfs.ext4.zst
-file ubuntu-channel-rootfs.ext4
-~~~
+```
 
-Se `file` indicar **ext4 raw**, converta para sparse se necessário:
+Use the existing Channel boot setup to deploy the rootfs.
 
-~~~sh
-img2simg ubuntu-channel-rootfs.ext4 ubuntu-sparse.img
-fastboot flash userdata ubuntu-sparse.img
-~~~
+After boot, `df -h /` shows available space. Confirm the root partition with `findmnt -n -o SOURCE,FSTYPE /` before using `resize2fs` if expansion is needed.
 
-Se já for **Android sparse**, não converta novamente: `fastboot flash userdata ubuntu-channel-rootfs.ext4`. Alguns fastboots também gravam diretamente o ext4 raw: `fastboot flash userdata ubuntu-channel-rootfs.ext4`. Para transformar sparse em raw no computador: `simg2img ubuntu-sparse.img ubuntu-extraido.ext4` (em Debian/Ubuntu, pacote `android-sdk-libsparse-utils`).
+## Network
 
-**O flash substitui os dados existentes em `userdata`.** Faça backup e confirme o destino. Sparse é formato de transporte e não expande o filesystem.
+Connect over the USB gadget at `172.16.42.1`:
 
----
+```sh
+ssh root@172.16.42.1
+```
 
-## Expandir o ext4 do `/` para a partição
+With working Wi-Fi, NetworkManager provides:
 
-Depois do primeiro boot, no **telefone**, como root, identifique origem, tipo e espaço:
+```sh
+nmcli device wifi list
+nmcli --ask device wifi connect "SSID" ifname wlan0
+```
 
-~~~sh
-findmnt -n -o SOURCE,FSTYPE /
-lsblk -o NAME,SIZE,FSTYPE,MOUNTPOINTS
-df -h /
-~~~
+## Time
 
-**Apenas se `/` for ext4 e a partição root estiver corretamente identificada**, use o dispositivo real no lugar do marcador:
+To correct an incorrect clock, enter the actual UTC time:
 
-~~~sh
-resize2fs /dev/PARTICAO_ROOT_CONFIRMADA
-df -h /
-~~~
-
-`resize2fs` sem tamanho cresce até o limite da partição, quando o kernel suporta redimensionamento online. Não execute `e2fsck` no `/` montado. Se faltar a ferramenta ou falhar online, use recuperação com ext4 desmontado e backup. A expansão não altera a tabela de partições.
+```sh
+date -u -s "YYYY-MM-DD HH:MM:SS"
+date
+```
