@@ -2,6 +2,8 @@
 
 Matriz **experimental** de rootfs ARM64 para o Motorola Moto G7 Play (`channel`, SDM632). Esta `main` centraliza os workflows que executam builds das branches de distribuição; **não** compila rootfs do Moto G5S Plus/Sanders.
 
+---
+
 ## Kernel comum e modelo de boot
 
 - Kernel: [SaaSD3v/linux](https://github.com/SaaSD3v/linux), branch `msm8953/latest`.
@@ -14,6 +16,8 @@ root=PARTUUID=76dbdefa-f243-cd22-5da5-9374e6ad318b rootfstype=ext4 rootwait rw
 ```
 
 As imagens ext4 das distribuições usam UUID `89530000-6320-4000-8000-000000000001`; o **label ext4 é próprio de cada distro**. PARTUUID GPT e UUID ext4 são identificadores diferentes. Confira a partição real antes de gravar qualquer imagem.
+
+---
 
 ## Distribuições e workflows da matriz
 
@@ -32,6 +36,8 @@ As imagens ext4 das distribuições usam UUID `89530000-6320-4000-8000-000000000
 
 **Status:** experimentais; a existência de um workflow/artifact não confirma inicialização ou Wi-Fi no aparelho. Cada branch de distro tem seu próprio `build.sh`, overlay e YAML; as cópias na `main` existem para disponibilizar **Run workflow**.
 
+---
+
 ## Como construir e baixar um rootfs
 
 1. Em **Actions**, execute **Build mainline kernel** se precisar gerar o checkpoint base.
@@ -47,6 +53,63 @@ zstd -d -k crux-channel-rootfs.ext4.zst
 
 Nunca misture rootfs de uma distribuição com módulos de uma compilação incompatível do kernel.
 
+---
+
+## Preparar imagem ext4 (raw ou Android sparse) e expandir `/`
+
+Este procedimento é para as **imagens de rootfs ext4**, não para `boot.img`, DTBO, lk2nd ou a imagem do kernel. Faça backup: **`fastboot flash userdata` apaga o conteúdo anterior da partição**. Execute a preparação no **computador**, após extrair o ZIP do artefato do GitHub Actions, se houver.
+
+```sh
+# Exemplo de arquivo deste repositório (troque pela distribuição desejada)
+zstd -d -k crux-channel-rootfs.ext4.zst
+file crux-channel-rootfs.ext4
+```
+
+O resultado de `file` determina o próximo passo:
+
+**Se for ext4 raw** (ex.: `Linux rev 1.0 ext4 filesystem data`), converta para o formato Android sparse antes de gravar:
+
+```sh
+img2simg crux-channel-rootfs.ext4 rootfs-sparse.img
+file rootfs-sparse.img
+fastboot flash userdata rootfs-sparse.img
+```
+
+**Se já for `Android sparse image`**, **não** execute `img2simg` outra vez; grave diretamente:
+
+```sh
+fastboot flash userdata crux-channel-rootfs.ext4
+```
+
+Um fastboot que aceite imagem ext4 raw também pode gravar o arquivo raw diretamente com `fastboot flash userdata crux-channel-rootfs.ext4`; a conversão sparse é útil para compatibilidade e transferência. Para inspecionar uma imagem Android sparse como ext4 raw sem gravar:
+
+```sh
+simg2img rootfs-sparse.img rootfs-extraido.ext4
+```
+
+`zstd`, `file`, `img2simg` e `simg2img` são utilitários **do computador**; em Debian/Ubuntu, os dois últimos normalmente vêm do pacote `android-sdk-libsparse-utils`.
+
+### Expandir o filesystem ext4 até o tamanho da partição
+
+Após iniciar o Linux no aparelho, a imagem pode ter um filesystem menor do que a partição `userdata`. `fastboot` **não** expande automaticamente o ext4 ao tamanho da partição. No **aparelho**, como root:
+
+```sh
+findmnt -n -o SOURCE,FSTYPE /
+lsblk -o NAME,SIZE,FSTYPE,MOUNTPOINTS
+df -h /
+```
+
+No Channel, o boot usa `userdata`, mas confirme o dispositivo efetivamente montado antes de usar `resize2fs`. **Somente se `/` for ext4 e a partição de root tiver espaço não utilizado**, substitua o marcador pelo dispositivo validado acima:
+
+```sh
+resize2fs /dev/PARTICAO_ROOT_CONFIRMADA
+df -h /
+```
+
+Sem parâmetro de tamanho, `resize2fs` expande o ext4 até o limite da partição existente quando o kernel suporta expansão online. **Não** execute em partição errada, filesystem que não seja ext4 ou imagem Android sparse; **não** use `e2fsck` em `/` montado. Se a expansão online falhar, faça o procedimento de recuperação com o filesystem desmontado, backup e verificação de integridade antes de tentar novamente.
+
+---
+
 ## USB RNDIS e acesso SSH
 
 As imagens foram preparadas para gerenciamento por USB: IP do telefone `172.16.42.1/24`, com acesso root no modo fixo `ssh_auth=ssh`, sem seletor de senha ou chave no dispatch.
@@ -58,6 +121,8 @@ ssh root@172.16.42.1
 ```
 
 Esse acesso de desenvolvimento concede root total a um host USB. Não conecte a equipamentos não confiáveis. O fato de o SSH escutar em `172.16.42.1` não basta para provar isolamento da rede Wi-Fi; valide no hardware.
+
+---
 
 ## Wi-Fi e Internet nas distribuições com NetworkManager
 
@@ -88,6 +153,8 @@ ping -c 3 1.1.1.1
 
 Também existe `nmcli device wifi connect "SSID" password "SENHA" ifname wlan0`, mas a senha pode ficar no histórico. Para usar uma conexão salva: `nmcli connection up "NOME_DA_CONEXAO"`. Não suponha que todos os ambientes tenham `systemctl`: Alpine usa OpenRC, Void usa runit e Chimera usa dinit.
 
+---
+
 ## CRUX-ARM 3.8: diferença importante
 
 **CRUX não recebe NetworkManager nem `nmcli` automaticamente neste builder.** O script monta uma base minimalista, prepara serviços BSD-style rc, configura USB RNDIS e compila/inclui `dnsmasq` para o DHCP USB. Se o computador não adquirir IP no USB, pode ser necessário definir manualmente um endereço do host, como `172.16.42.2/24`, nessa interface.
@@ -103,6 +170,8 @@ command -v iw
 
 Se você **instalar NetworkManager posteriormente**, poderá usar os comandos `nmcli` da seção anterior **após configurá-lo e iniciar o serviço conforme o CRUX**. Essa instalação é responsabilidade do sistema já iniciado, não do builder experimental. A presença de `wlan0` e firmware também precisa ser confirmada. Evite assumir que o comando de varredura Wi-Fi existirá antes de instalar as ferramentas necessárias.
 
+---
+
 ## Data e hora UTC — configuração manual temporária
 
 Os scripts desta matriz não adicionam uma configuração própria de NTP/Chrony/Timesyncd. Alguns sistemas-base podem trazer configurações suas; o projeto não garante ausência total desses pacotes. `TZ` muda a exibição do fuso, **não** ajusta um relógio parado em 1970. Hora errada pode quebrar certificados HTTPS e gerenciadores de pacotes, sobretudo no primeiro boot.
@@ -116,4 +185,4 @@ date -u
 date
 ```
 
-O ajuste é provisório e não é sincronização automática; com RTC inadequado, talvez seja necessário repeti-lo após reinicialização. `TZ=America/Porto_Velho date` só altera a apresentação quando os dados do fuso estão disponíveis.
+Para conferir a apresentação em UTC, sem alterar o relógio: `TZ=UTC date`.
