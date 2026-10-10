@@ -88,8 +88,7 @@ sudo chroot "$ROOTFS" /bin/sh -ec '
     kmod busybox-static \
     e2fsprogs util-linux procps \
     less nano ethtool iw \
-    wpasupplicant wireless-regdb \
-    systemd-timesyncd
+    wpasupplicant wireless-regdb
   apt-get clean
   rm -rf /var/lib/apt/lists/*
 '
@@ -153,14 +152,10 @@ sudo systemctl --root="$ROOTFS" disable ssh.socket 2>/dev/null || true
 sudo systemctl --root="$ROOTFS" disable dnsmasq.service 2>/dev/null || true
 sudo systemctl --root="$ROOTFS" enable \
   channel-usb-gadget.service channel-dhcp.service \
-  channel-wifi-firmware.service NetworkManager.service dbus.socket systemd-timesyncd.service
+  channel-wifi-firmware.service NetworkManager.service dbus.socket
 
 sudo systemctl --root="$ROOTFS" enable ssh.service
 
-# Keep a persistent time floor. systemd-timesyncd advances this after a
-# successful sync, preventing the broken device RTC from dropping back to 1970.
-sudo install -d -m 0755 "$ROOTFS/var/lib/systemd/timesync"
-sudo touch "$ROOTFS/var/lib/systemd/timesync/clock"
 
 # This device is intentionally headless. Persist the journal so boot/USB
 # failures can be inspected by mounting the microSD on another machine.
@@ -235,7 +230,6 @@ echo "::endgroup::"
   echo "usb_network_manager=unmanaged"
   echo "wifi_runtime_setup=nmcli"
   echo "wifi_firmware=stock-modem-vendor-readonly"
-  echo "time_sync=systemd-timesyncd"
 } > "$OUT_DIR/build-info.txt"
 
 (
