@@ -25,24 +25,26 @@ date -u -s "YYYY-MM-DD HH:MM:SS"
 date
 ```
 
-## Optional Android sparse tools
+## Expand the root filesystem
 
-These builds output raw ext4. Sparse conversion is optional and does not replace the existing Channel boot process.
-
-A sparse-tool package for the CRUX base was not verified. Use a Debian/Ubuntu computer to handle the image:
+After boot, run as root and identify the partition mounted at `/`:
 
 ```sh
-sudo apt install android-sdk-libsparse-utils
+lsblk -o NAME,SIZE,FSTYPE,MOUNTPOINTS
+grep ' / ' /proc/mounts
+command -v resize2fs
 ```
 
-After decompressing the matching rootfs image:
+If `resize2fs` is unavailable on CRUX, provide `e2fsprogs` through its supported package/ports setup or resize the filesystem from recovery. Do not assume a package command that has not been verified.
+
+If the root filesystem is ext4, use its **confirmed device path**:
 
 ```sh
-img2simg crux-channel-rootfs.ext4 rootfs-sparse.img
-simg2img rootfs-sparse.img rootfs-restored.ext4
+resize2fs /dev/ROOT_PARTITION
+df -h /
 ```
 
-`img2simg` converts raw to sparse; `simg2img` converts sparse back to raw. 
+This grows ext4 to the available space in its existing partition. Do not guess the root device.
 
 ## Rootfs details
 
