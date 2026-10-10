@@ -4,8 +4,6 @@ set -euo pipefail
 : "${KERNEL_DIR:?set KERNEL_DIR}"
 : "${OUT_DIR:?set OUT_DIR}"
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-FRAGMENT="$REPO_ROOT/mainline/channel-mainline.config"
 JOBS="${JOBS:-$(nproc)}"
 
 cd "$KERNEL_DIR"
@@ -13,7 +11,6 @@ mkdir -p "$OUT_DIR"
 
 echo "::group::Configure kernel"
 make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- defconfig
-scripts/kconfig/merge_config.sh -m .config "$FRAGMENT"
 make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
 
 required_y=(
