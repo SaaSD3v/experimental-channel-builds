@@ -34,6 +34,23 @@ date -u -s "YYYY-MM-DD HH:MM:SS"
 date
 ```
 
+## Optional Android sparse tools
+
+The image is raw ext4. Install these tools on a Void Linux system only if sparse conversion is needed:
+
+```sh
+sudo xbps-install -S android-tools
+```
+
+After decompressing `void-channel-rootfs.ext4.zst`:
+
+```sh
+img2simg void-channel-rootfs.ext4 rootfs-sparse.img
+simg2img rootfs-sparse.img rootfs-restored.ext4
+```
+
+The first command makes an Android sparse image; the second restores raw ext4. Neither command flashes a device.
+
 ## Rootfs details
 
 - Artifact: `channel-void-rootfs`
