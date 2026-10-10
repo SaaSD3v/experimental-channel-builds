@@ -1,7 +1,7 @@
 #!/sbin/openrc-run
 
 description="OpenSSH server bound to the Channel USB management address"
-command="/usr/sbin/sshd"
+command="/usr/sbin/sshd.pam"
 command_args="-D -e"
 supervisor=supervise-daemon
 respawn_delay=2

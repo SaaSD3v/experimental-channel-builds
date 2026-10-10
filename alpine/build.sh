@@ -83,7 +83,7 @@ sudo "$APK_STATIC" \
   --update-cache add \
     openrc busybox-openrc \
     eudev eudev-openrc udev-init-scripts udev-init-scripts-openrc \
-    openssh-server openssh-client \
+    openssh-server-pam openssh-client \
     iproute2 \
     dnsmasq dnsmasq-openrc \
     ca-certificates \
@@ -128,145 +128,18 @@ if [ ! -s "$ROOTFS/etc/machine-id" ]; then
   openssl rand -hex 16 | sudo tee "$ROOTFS/etc/machine-id" >/dev/null
 fi
 
-SSH_AUTH_MODE="${SSH_AUTH_MODE:-auto}"
-SSH_PUBLIC_KEY_INPUT="${SSH_PUBLIC_KEY_INPUT:-}"
-SSH_PUBLIC_KEY="${SSH_PUBLIC_KEY:-}"
-SSH_PASSWORD="${SSH_PASSWORD:-}"
-
-rm -f "$OUT_DIR/channel_test_ed25519" "$OUT_DIR/channel_test_ed25519.pub" "$OUT_DIR/channel_ssh_password.txt"
-sudo mkdir -p "$ROOTFS/root/.ssh"
-sudo chmod 0700 "$ROOTFS/root/.ssh"
-KEYFILE="$WORK_DIR/authorized_key"
-rm -f "$KEYFILE"
-
-ALLOW_KEY=0
-ALLOW_PASSWORD=0
-ALLOW_EMPTY_SSH=0
-ROOT_PASSWORD=""
-
-install_public_key() {
-  printf '%s\n' "$1" | tr -d '\r' > "$KEYFILE"
-  ssh-keygen -l -f "$KEYFILE" >/dev/null
-  sudo install -m 0600 -o root -g root "$KEYFILE" "$ROOTFS/root/.ssh/authorized_keys"
-  ALLOW_KEY=1
-}
-
-generate_public_key() {
-  ssh-keygen -q -t ed25519 -N "" -C "channel-alpine-bringup-ci" -f "$OUT_DIR/channel_test_ed25519"
-  install_public_key "$(cat "$OUT_DIR/channel_test_ed25519.pub")"
-}
-
-generate_password() {
-  ROOT_PASSWORD="$(openssl rand -hex 24)"
-  printf '%s\n' "$ROOT_PASSWORD" > "$OUT_DIR/channel_ssh_password.txt"
-  chmod 0600 "$OUT_DIR/channel_ssh_password.txt"
-  ALLOW_PASSWORD=1
-}
-
-case "$SSH_AUTH_MODE" in
-  auto)
-    if [ -n "$SSH_PUBLIC_KEY" ]; then
-      install_public_key "$SSH_PUBLIC_KEY"
-      SSH_AUTH_MODE="public-key-secret"
-    else
-      generate_public_key
-      SSH_AUTH_MODE="generated-key"
-    fi
-    ;;
-  generated-key)
-    generate_public_key
-    ;;
-  public-key-input)
-    [ -n "$SSH_PUBLIC_KEY_INPUT" ] || { echo "ssh_public_key input is required for public-key-input" >&2; exit 2; }
-    install_public_key "$SSH_PUBLIC_KEY_INPUT"
-    ;;
-  public-key-secret)
-    [ -n "$SSH_PUBLIC_KEY" ] || { echo "SSH_PUBLIC_KEY secret is required for public-key-secret" >&2; exit 2; }
-    install_public_key "$SSH_PUBLIC_KEY"
-    ;;
-  generated-password)
-    generate_password
-    ;;
-  password-secret)
-    [ -n "$SSH_PASSWORD" ] || { echo "SSH_PASSWORD secret is required for password-secret" >&2; exit 2; }
-    ROOT_PASSWORD="$SSH_PASSWORD"
-    ALLOW_PASSWORD=1
-    ;;
-  generated-key+generated-password)
-    generate_public_key
-    generate_password
-    ;;
-  public-key-input+password-secret)
-    [ -n "$SSH_PUBLIC_KEY_INPUT" ] || { echo "ssh_public_key input is required" >&2; exit 2; }
-    [ -n "$SSH_PASSWORD" ] || { echo "SSH_PASSWORD secret is required" >&2; exit 2; }
-    install_public_key "$SSH_PUBLIC_KEY_INPUT"
-    ROOT_PASSWORD="$SSH_PASSWORD"
-    ALLOW_PASSWORD=1
-    ;;
-  public-key-secret+password-secret)
-    [ -n "$SSH_PUBLIC_KEY" ] || { echo "SSH_PUBLIC_KEY secret is required" >&2; exit 2; }
-    [ -n "$SSH_PASSWORD" ] || { echo "SSH_PASSWORD secret is required" >&2; exit 2; }
-    install_public_key "$SSH_PUBLIC_KEY"
-    ROOT_PASSWORD="$SSH_PASSWORD"
-    ALLOW_PASSWORD=1
-    ;;
-  open-root-usb)
-    ALLOW_EMPTY_SSH=1
-    ;;
-  *)
-    echo "Unsupported SSH_AUTH_MODE: $SSH_AUTH_MODE" >&2
-    exit 2
-    ;;
-esac
-
-if [ "$ALLOW_EMPTY_SSH" -eq 1 ]; then
-  # Alpine OpenSSH is built without PAM by default. An empty root password is
-  # therefore required for the SSH "none"/empty-password path. No getty is
-  # enabled in this image, and sshd only listens on the USB RNDIS address.
-  sudo sed -i 's|^root:[^:]*:|root::|' "$ROOTFS/etc/shadow"
-elif [ "$ALLOW_PASSWORD" -eq 1 ]; then
-  ROOT_HASH="$(openssl passwd -6 "$ROOT_PASSWORD")"
-  sudo sed -i "s|^root:[^:]*:|root:${ROOT_HASH}:|" "$ROOTFS/etc/shadow"
-  unset ROOT_HASH ROOT_PASSWORD
-else
-  RANDOM_PASSWORD="$(openssl rand -hex 48)"
-  ROOT_HASH="$(openssl passwd -6 "$RANDOM_PASSWORD")"
-  sudo sed -i "s|^root:[^:]*:|root:${ROOT_HASH}:|" "$ROOTFS/etc/shadow"
-  unset RANDOM_PASSWORD ROOT_HASH
-fi
-
-if [ "$ALLOW_EMPTY_SSH" -eq 1 ]; then
-  SSH_ROOT_LOGIN=yes
-  SSH_PUBKEY=no
-  SSH_PASSWORD_AUTH=yes
-  SSH_EMPTY_PASSWORDS=yes
-elif [ "$ALLOW_PASSWORD" -eq 1 ]; then
-  SSH_ROOT_LOGIN=yes
-  SSH_PUBKEY=$([ "$ALLOW_KEY" -eq 1 ] && echo yes || echo no)
-  SSH_PASSWORD_AUTH=yes
-  SSH_EMPTY_PASSWORDS=no
-elif [ "$ALLOW_KEY" -eq 1 ]; then
-  SSH_ROOT_LOGIN=prohibit-password
-  SSH_PUBKEY=yes
-  SSH_PASSWORD_AUTH=no
-  SSH_EMPTY_PASSWORDS=no
-else
-  echo "No usable SSH authentication method selected" >&2
-  exit 2
-fi
-
-sudo tee "$ROOTFS/etc/ssh/sshd_config.d/10-channel-usb.conf" >/dev/null <<EOF
-ListenAddress 172.16.42.1
-AllowUsers root
-PermitRootLogin $SSH_ROOT_LOGIN
-PubkeyAuthentication $SSH_PUBKEY
-PasswordAuthentication $SSH_PASSWORD_AUTH
-KbdInteractiveAuthentication no
-PermitEmptyPasswords $SSH_EMPTY_PASSWORDS
-UseDNS no
-EOF
-
-if ! sudo grep -Eq '^[[:space:]]*Include[[:space:]]+/etc/ssh/sshd_config\.d/\*\.conf' "$ROOTFS/etc/ssh/sshd_config"; then
+# Fixed SSH service via USB RNDIS. Keep Unix root password nonempty.
+RANDOM_PASSWORD="$(openssl rand -hex 48)"
+ROOT_HASH="$(openssl passwd -6 "$RANDOM_PASSWORD")"
+sudo sed -i "s|^root:[^:]*:|root:${ROOT_HASH}:|" "$ROOTFS/etc/shadow"
+unset RANDOM_PASSWORD ROOT_HASH
+sudo mkdir -p "$ROOTFS/etc/pam.d" "$ROOTFS/etc/ssh/sshd_config.d"
+sudo tee "$ROOTFS/etc/pam.d/sshd" >/dev/null <<'PAM'
+auth required pam_permit.so
+account required pam_permit.so
+session required pam_permit.so
+PAM
+if ! sudo grep -Fq 'Include /etc/ssh/sshd_config.d/*.conf' "$ROOTFS/etc/ssh/sshd_config"; then
   sudo sed -i '1iInclude /etc/ssh/sshd_config.d/*.conf' "$ROOTFS/etc/ssh/sshd_config"
 fi
 
@@ -305,7 +178,7 @@ grep -Fqx 'wifi.backend=wpa_supplicant' "$ROOTFS/etc/NetworkManager/conf.d/10-ch
 
 # This image is intentionally headless. Alpine's init spawns gettys from
 # /etc/inittab, independently of OpenRC runlevel links. Remove both forms so
-# open-root-usb cannot expose the empty root password on a local/serial console.
+# USB SSH cannot expose the empty root password on a local/serial console.
 sudo sed -i -E '/::(respawn|askfirst):.*(a?getty)/d' "$ROOTFS/etc/inittab"
 sudo rm -f "$ROOTFS"/etc/runlevels/default/agetty.* "$ROOTFS"/etc/runlevels/default/consolefont 2>/dev/null || true
 if grep -Eq '::(respawn|askfirst):.*(a?getty)' "$ROOTFS/etc/inittab"; then
@@ -328,7 +201,7 @@ sudo cp "$KERNEL_SYSTEM_MAP_FILE" "$ROOTFS/boot/System.map-$KREL"
 echo "::endgroup::"
 
 echo "::group::Finalize Alpine rootfs"
-sudo chroot "$ROOTFS" /usr/sbin/sshd -t
+sudo chroot "$ROOTFS" /usr/sbin/sshd.pam -t
 
 # qemu-aarch64-static is a host-side helper and must not ship in the target image.
 sudo rm -f "$ROOTFS/usr/bin/qemu-aarch64-static"
@@ -365,7 +238,7 @@ echo "::endgroup::"
   echo "init=openrc"
   echo "usb_device_ip=172.16.42.1"
   echo "usb_dhcp_range=172.16.42.2-172.16.42.20"
-  echo "ssh_auth=$SSH_AUTH_MODE"
+  echo "ssh_auth=ssh"
   echo "ssh_listen=172.16.42.1"
   echo "ssh_scope=usb-only"
   echo "wifi_manager=NetworkManager"
