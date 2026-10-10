@@ -34,6 +34,25 @@ date -u -s "YYYY-MM-DD HH:MM:SS"
 date
 ```
 
+## Optional Android sparse tools
+
+These builds output raw ext4. Sparse conversion is optional and does not replace the existing Channel boot process.
+
+Install on Arch Linux ARM before converting an image:
+
+```sh
+sudo pacman -S android-tools
+```
+
+After decompressing the matching rootfs image:
+
+```sh
+img2simg arch-channel-rootfs.ext4 rootfs-sparse.img
+simg2img rootfs-sparse.img rootfs-restored.ext4
+```
+
+`img2simg` converts raw to sparse; `simg2img` converts sparse back to raw. 
+
 ## Rootfs details
 
 - Artifact: `channel-arch-rootfs`
