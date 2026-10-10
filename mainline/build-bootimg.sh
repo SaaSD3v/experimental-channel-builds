@@ -7,7 +7,7 @@ set -euo pipefail
 KREL="$KERNEL_RELEASE"
 KERNEL_DTB="$OUT_DIR/Image.gz-dtb-$KREL"
 BOOTIMG="$OUT_DIR/boot-channel.img"
-CHANNEL_ROOT_PARTUUID="${CHANNEL_ROOT_PARTUUID:-76dbdefa-f243-cd22-5da5-9374e6ad318b}"
+CHANNEL_ROOT_DEVICE="${CHANNEL_ROOT_DEVICE:-PARTLABEL=userdata}"
 
 if [ -n "${KERNEL_IMAGE:-}" ]; then
   KERNEL="$KERNEL_IMAGE"
@@ -21,7 +21,7 @@ test -s "$CHANNEL_DTB"
 
 cat "$KERNEL" "$CHANNEL_DTB" > "$KERNEL_DTB"
 
-CMDLINE="${KERNEL_CMDLINE:-console=ttyMSM0,115200n8 console=tty0 root=PARTUUID=$CHANNEL_ROOT_PARTUUID rootfstype=ext4 rootwait rw loglevel=7 ignore_loglevel}"
+CMDLINE="${KERNEL_CMDLINE:-console=ttyMSM0,115200n8 console=tty0 root=$CHANNEL_ROOT_DEVICE rootfstype=ext4 rootwait rw loglevel=7 ignore_loglevel}"
 
 if [ -n "${MKBOOTIMG_PY:-}" ]; then
   test -s "$MKBOOTIMG_PY"
