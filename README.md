@@ -27,31 +27,26 @@ date -u -s "YYYY-MM-DD HH:MM:SS"
 date
 ```
 
-## Optional Android sparse tools
+## Expand the root filesystem
 
-These builds output raw ext4. Sparse conversion is optional and does not replace the existing Channel boot process.
-
-| Linux environment | Install sparse tools |
-| --- | --- |
-| Debian | `sudo apt install android-sdk-libsparse-utils` |
-| Ubuntu | `sudo apt install android-sdk-libsparse-utils` |
-| Alpine (community) | `apk add android-tools-img2simg android-tools-simg2img` |
-| Arch Linux ARM | `sudo pacman -S android-tools` |
-| Fedora | `sudo dnf install android-tools` |
-| Gentoo | `emerge --ask dev-util/android-tools` |
-| openSUSE | `sudo zypper install android-tools` |
-| Void Linux | `sudo xbps-install -S android-tools` |
-| Chimera Linux | `apk add android-tools` |
-| CRUX (use a Debian/Ubuntu host) | `sudo apt install android-sdk-libsparse-utils` |
-
-After decompressing the matching rootfs image:
+After boot, run as root and identify the partition mounted at `/`:
 
 ```sh
-img2simg crux-channel-rootfs.ext4 rootfs-sparse.img
-simg2img rootfs-sparse.img rootfs-restored.ext4
+lsblk -o NAME,SIZE,FSTYPE,MOUNTPOINTS
+grep ' / ' /proc/mounts
+command -v resize2fs
 ```
 
-`img2simg` converts raw to sparse; `simg2img` converts sparse back to raw. For CRUX, the installation command above is for a Debian/Ubuntu host, not for CRUX.
+If `resize2fs` is missing, install the distro's `e2fsprogs` package (`e2fsprogs-extra` on Alpine).
+
+If the root filesystem is ext4, use its **confirmed device path**:
+
+```sh
+resize2fs /dev/ROOT_PARTITION
+df -h /
+```
+
+This grows ext4 to the available space in its existing partition. Do not guess the root device.
 
 ## Rootfs details
 
