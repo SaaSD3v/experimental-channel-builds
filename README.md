@@ -10,18 +10,6 @@ The rootfs runs with systemd. It uses modules from a matching mainline Channel k
 
 The artifact is `channel-debian-rootfs`.
 
-## Image
-
-Download `debian-channel-rootfs.ext4.zst` and extract the raw ext4 image:
-
-```sh
-zstd -d -k debian-channel-rootfs.ext4.zst
-```
-
-Deployment follows the existing Channel boot setup. No separate flashing instructions are needed here.
-
-After boot, check root space with `df -h /`. If necessary, confirm the ext4 root device with `findmnt -n -o SOURCE,FSTYPE /` before using `resize2fs`.
-
 ## Network
 
 SSH access is available through the USB gadget at `172.16.42.1`:
@@ -45,3 +33,11 @@ If the device clock needs correction, set the actual UTC time:
 date -u -s "YYYY-MM-DD HH:MM:SS"
 date
 ```
+
+## Rootfs details
+
+- Artifact: `channel-debian-rootfs`
+- Image: `debian-channel-rootfs.ext4.zst`
+- Format: ext4 (raw, zstd-compressed)
+- Label: `debian`
+- UUID: `89530000-6320-4000-8000-000000000001`
