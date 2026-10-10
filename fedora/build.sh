@@ -31,7 +31,7 @@ docker rm "$CID" >/dev/null
 trap - RETURN
 sudo install -m 0755 /usr/bin/qemu-aarch64-static "$ROOTFS/usr/bin/qemu-aarch64-static"
 sudo rm -f "$ROOTFS/etc/resolv.conf"; sudo cp /etc/resolv.conf "$ROOTFS/etc/resolv.conf"
-sudo chroot "$ROOTFS" /bin/bash -lc 'dnf -y upgrade --refresh && dnf -y install systemd passwd shadow-utils openssh-server openssh-clients iproute iputils dnsmasq ca-certificates kmod e2fsprogs util-linux procps-ng less nano ethtool iw wpa_supplicant dbus NetworkManager chrony && dnf clean all'
+sudo chroot "$ROOTFS" /bin/bash -lc 'dnf -y upgrade --refresh && dnf -y install systemd passwd shadow-utils openssh-server openssh-clients iproute iputils dnsmasq ca-certificates kmod e2fsprogs util-linux procps-ng less nano ethtool iw wpa_supplicant dbus NetworkManager && dnf clean all'
 sudo rm -f "$ROOTFS/usr/bin/qemu-aarch64-static"
 echo "::endgroup::"
 
