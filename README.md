@@ -34,6 +34,23 @@ date -u -s "YYYY-MM-DD HH:MM:SS"
 date
 ```
 
+## Optional Android sparse tools
+
+The image is raw ext4. Install these tools on a openSUSE Tumbleweed system only if sparse conversion is needed:
+
+```sh
+sudo zypper install android-tools
+```
+
+After decompressing `opensuse-channel-rootfs.ext4.zst`:
+
+```sh
+img2simg opensuse-channel-rootfs.ext4 rootfs-sparse.img
+simg2img rootfs-sparse.img rootfs-restored.ext4
+```
+
+The first command makes an Android sparse image; the second restores raw ext4. Neither command flashes a device.
+
 ## Rootfs details
 
 - Artifact: `channel-opensuse-rootfs`
