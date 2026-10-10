@@ -34,22 +34,30 @@ date -u -s "YYYY-MM-DD HH:MM:SS"
 date
 ```
 
-## Optional Android sparse tools
+## Expand the root filesystem
 
-The image is raw ext4. Install these tools on a Void Linux system only if sparse conversion is needed:
-
-```sh
-sudo xbps-install -S android-tools
-```
-
-After decompressing `void-channel-rootfs.ext4.zst`:
+On the booted device, as root, identify the ext4 partition mounted at `/`:
 
 ```sh
-img2simg void-channel-rootfs.ext4 rootfs-sparse.img
-simg2img rootfs-sparse.img rootfs-restored.ext4
+lsblk -o NAME,SIZE,FSTYPE,MOUNTPOINTS
+grep ' / ' /proc/mounts
+command -v resize2fs
 ```
 
-The first command makes an Android sparse image; the second restores raw ext4. Neither command flashes a device.
+If `resize2fs` is missing, install it:
+
+```sh
+xbps-install -S e2fsprogs
+```
+
+Then use the **verified root partition**:
+
+```sh
+resize2fs /dev/ROOT_PARTITION
+df -h /
+```
+
+This expands ext4 to the available size of the existing partition. Never guess the device path.
 
 ## Rootfs details
 
