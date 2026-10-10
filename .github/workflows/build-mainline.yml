@@ -15,7 +15,7 @@ env:
   KERNEL_REF: msm8953/latest
   MKBOOTIMG_URL: https://android.googlesource.com/platform/system/tools/mkbootimg
   MKBOOTIMG_REF: d3b6ee4295e1491432ce3d0fcfd53631177bbef4
-  CHANNEL_ROOT_PARTUUID: 76dbdefa-f243-cd22-5da5-9374e6ad318b
+  CHANNEL_ROOT_DEVICE: PARTLABEL=userdata
 
 jobs:
   kernel:
@@ -99,14 +99,14 @@ jobs:
           OUT_DIR: ${{ github.workspace }}/out
           KERNEL_IMAGE: ${{ github.workspace }}/out/Image.gz
           CHANNEL_DTB: ${{ github.workspace }}/out/sdm632-motorola-channel.dtb
-          CHANNEL_ROOT_PARTUUID: ${{ env.CHANNEL_ROOT_PARTUUID }}
+          CHANNEL_ROOT_DEVICE: ${{ env.CHANNEL_ROOT_DEVICE }}
           MKBOOTIMG_PY: ${{ github.workspace }}/aosp-mkbootimg/mkbootimg.py
         run: |
           set -euxo pipefail
           chmod +x mainline/build-bootimg.sh
           mainline/build-bootimg.sh
           test -s out/boot-channel.img
-          grep -Fq "root=PARTUUID=$CHANNEL_ROOT_PARTUUID" out/kernel-cmdline.txt
+          grep -Fq "root=$CHANNEL_ROOT_DEVICE" out/kernel-cmdline.txt
           grep -Fq 'rootfstype=ext4' out/kernel-cmdline.txt
           grep -Fq 'rootwait' out/kernel-cmdline.txt
           ! grep -Fq 'rdinit=/init' out/kernel-cmdline.txt
@@ -116,7 +116,7 @@ jobs:
           test -s /tmp/unpacked-boot/kernel
           test ! -s /tmp/unpacked-boot/ramdisk
 
-          echo "root_partuuid=$CHANNEL_ROOT_PARTUUID" >> out/kernel-info.txt
+          echo "root_device=$CHANNEL_ROOT_DEVICE" >> out/kernel-info.txt
 
       - name: Finalize kernel checkpoint
         run: |
