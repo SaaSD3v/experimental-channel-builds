@@ -34,37 +34,30 @@ date -u -s "YYYY-MM-DD HH:MM:SS"
 date
 ```
 
-## Alpine utilities
+## Expand the root filesystem
 
-Without `findmnt`, inspect the root mount using `grep ' / ' /proc/mounts`.
-
-Optional packages:
+After boot, run as root and identify the partition mounted at `/`:
 
 ```sh
-apk add e2fsprogs-extra          # resize2fs
-apk add android-tools-img2simg  # Android sparse converter (community)
+lsblk -o NAME,SIZE,FSTYPE,MOUNTPOINTS
+grep ' / ' /proc/mounts
+command -v resize2fs
 ```
 
-The build outputs raw ext4, without sparse conversion.
-
-## Optional Android sparse tools
-
-These builds output raw ext4. Sparse conversion is optional and does not replace the existing Channel boot process.
-
-Install on Alpine (community) before converting an image:
+For Alpine, install the missing tool:
 
 ```sh
-apk add android-tools-img2simg android-tools-simg2img
+apk add e2fsprogs-extra
 ```
 
-After decompressing the matching rootfs image:
+If the root filesystem is ext4, use its **confirmed device path**:
 
 ```sh
-img2simg alpine-channel-rootfs.ext4 rootfs-sparse.img
-simg2img rootfs-sparse.img rootfs-restored.ext4
+resize2fs /dev/ROOT_PARTITION
+df -h /
 ```
 
-`img2simg` converts raw to sparse; `simg2img` converts sparse back to raw. Enable Alpine's community repository if the split packages are not found.
+This grows ext4 to the available space in its existing partition. Do not guess the root device.
 
 ## Rootfs details
 
