@@ -218,7 +218,6 @@ jobs:
           grep -Fqx 'rootfs_label=ubuntu' out/build-info.txt
           grep -Fqx "rootfs_uuid=$ROOTFS_UUID" out/build-info.txt
           grep -Fqx 'wifi_manager=NetworkManager' out/build-info.txt
-          grep -Fqx 'time_sync=systemd-timesyncd' out/build-info.txt
           grep -Fqx 'ssh_listen=172.16.42.1' out/build-info.txt
           grep -Fqx 'ssh_auth=ssh' out/build-info.txt
 

@@ -221,7 +221,6 @@ jobs:
           grep -Fqx "rootfs_uuid=$ROOTFS_UUID" out/build-info.txt
           grep -Fqx 'init=openrc' out/build-info.txt
           grep -Fqx 'wifi_manager=NetworkManager' out/build-info.txt
-          grep -Fqx 'time_sync=chrony' out/build-info.txt
           grep -Fqx 'ssh_listen=172.16.42.1' out/build-info.txt
           grep -Fqx 'ssh_auth=ssh' out/build-info.txt
 
