@@ -46,3 +46,11 @@ fastboot flash userdata <distro>-channel-rootfs.ext4
 ```
 
 The `userdata` GPT PARTUUID is not replaced by flashing the ext4 filesystem image.
+
+## USB SSH access
+
+Every rootfs workflow uses the fixed `ssh` management mode over USB RNDIS at
+`172.16.42.1`. No SSH authentication method is shown in **Run workflow** and
+no SSH user credential artifacts are generated. The intended connection is
+`ssh root@172.16.42.1`; runtime authentication and USB network isolation
+must be verified on the device.
