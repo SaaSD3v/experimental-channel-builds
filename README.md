@@ -34,6 +34,23 @@ date -u -s "YYYY-MM-DD HH:MM:SS"
 date
 ```
 
+## Optional Android sparse tools
+
+The image is raw ext4. Install these tools on a Gentoo system only if sparse conversion is needed:
+
+```sh
+emerge --ask dev-util/android-tools
+```
+
+After decompressing `gentoo-channel-rootfs.ext4.zst`:
+
+```sh
+img2simg gentoo-channel-rootfs.ext4 rootfs-sparse.img
+simg2img rootfs-sparse.img rootfs-restored.ext4
+```
+
+The first command makes an Android sparse image; the second restores raw ext4. Neither command flashes a device.
+
 ## Rootfs details
 
 - Artifact: `channel-gentoo-rootfs`
